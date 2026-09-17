@@ -9,6 +9,8 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
       <h1></h1>
       <span class="badge" hidden>비회원 대화</span>
     </div>
+    <p class="notice" role="alert" hidden><span class="notice__text"></span>
+      <button type="button" class="btn btn--quiet btn--icon btn--compact" data-action="dismiss" aria-label="알림 닫기">${icons.close()}</button></p>
     <div class="chat__actions">
       <button type="button" class="btn btn--compact" data-action="toggle-panel">
         ${icons.panel()} 검토 패널
@@ -23,6 +25,8 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
   const loginBtn = must<HTMLButtonElement>('[data-action="login"]', root);
   const logoutBtn = must<HTMLButtonElement>('[data-action="logout"]', root);
   const panelBtn = must<HTMLButtonElement>('[data-action="toggle-panel"]', root);
+  const notice = must<HTMLParagraphElement>('.notice', root);
+  const noticeText = must<HTMLSpanElement>('.notice__text', root);
 
   onAction(root, {
     'toggle-panel': () => {
@@ -31,6 +35,7 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
     },
     login: () => actions.openLogin(),
     logout: () => actions.signOut(),
+    dismiss: () => actions.dismissNotice(),
   });
 
   return {
@@ -38,10 +43,13 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
       const active = state.conversations.find((c) => c.id === state.activeConversationId);
       heading.textContent = active?.title ?? '새 대화';
 
-      const anonymous = state.user === null;
+      const anonymous = state.user?.anonymous ?? true;
       badge.hidden = !anonymous;
       loginBtn.hidden = !anonymous;
       logoutBtn.hidden = anonymous;
+
+      notice.hidden = state.notice === null;
+      noticeText.textContent = state.notice ?? '';
 
       panelBtn.setAttribute('aria-expanded', String(state.panelOpen));
       panelBtn.innerHTML = `${icons.panel()} ${esc(state.panelOpen ? '패널 닫기' : '검토 패널')}`;

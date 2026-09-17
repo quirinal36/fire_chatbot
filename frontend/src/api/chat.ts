@@ -1,40 +1,60 @@
 /**
- * 챗봇 응답 연동 지점.
- *
- * 아직 백엔드가 없으므로 고정 답변을 돌려줍니다. 실제 연동 시에는 이 함수 안을
- * 서버 호출로 바꾸세요. 스트리밍 응답을 쓸 계획이면 반환 타입을
- * AsyncIterable<string> 으로 바꾸고 messageList 에서 받아 이어 붙이면 됩니다.
- *
- *   const res = await fetch('/api/chat', {
- *     method: 'POST',
- *     headers: { 'Content-Type': 'application/json' },
- *     body: JSON.stringify({ conversationId, question }),
- *   });
- *
- * 도면 해석과 법령 검색은 서버에서 수행하고, 이 화면은 결과만 그립니다.
+ * POST /api/chat — SSE 로 진행 상태와 검증된 최종 답변을 받는다 (ISS-015).
  */
-
-import type { AssistantMessage } from '../types';
+import type { AnswerEnvelope } from '../types';
+import { apiFetch, ApiError } from './client';
 
 export interface ChatRequest {
-  readonly conversationId: string;
+  readonly sessionId: string;
+  readonly clientRequestId: string;
   readonly question: string;
+  readonly caseId?: string;
 }
 
-let counter = 0;
+export interface ChatReply {
+  readonly messageId: string | null;
+  readonly envelope: AnswerEnvelope;
+  readonly replayed: boolean;
+}
 
-export async function requestAnswer(req: ChatRequest): Promise<AssistantMessage> {
-  // 응답을 기다리는 화면을 확인하기 위한 지연입니다.
-  await new Promise((resolve) => setTimeout(resolve, 900));
-  counter += 1;
+export type ChatPhase = 'searching' | 'writing';
 
-  return {
-    id: `a-${counter}`,
-    role: 'assistant',
-    paragraphs: [
-      `"${req.question}" 에 대한 답변입니다. 지금은 **응답 서버가 연결되지 않아** 고정 문구를 표시합니다.`,
-      'src/api/chat.ts 의 requestAnswer 함수를 실제 API 호출로 바꾸면 이 자리에 검토 결과가 들어옵니다.',
-    ],
-    disclaimer: 'AI 검토 결과는 참고용이며, 최종 판단은 담당 공무원의 검토를 거쳐야 합니다.',
-  };
+/** SSE 본문을 이벤트 단위로 나눈다 */
+export function parseSse(buffer: string): { events: { event: string; data: string }[]; rest: string } {
+  const events: { event: string; data: string }[] = [];
+  const blocks = buffer.split(/\r?\n\r?\n/);
+  const rest = blocks.pop() ?? '';
+  for (const block of blocks) {
+    let event = 'message';
+    const data: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+    }
+    if (data.length) events.push({ event, data: data.join('\n') });
+  }
+  return { events, rest };
+}
+
+export async function requestAnswer(req: ChatRequest, onPhase: (phase: ChatPhase) => void): Promise<ChatReply> {
+  const res = await apiFetch('/api/chat', { method: 'POST', body: JSON.stringify(req) });
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError(0, 'network', '응답을 읽지 못했습니다.');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: true });
+    const { events, rest } = parseSse(done ? `${buffer}\n\n` : buffer);
+    buffer = rest;
+    for (const e of events) {
+      const data = JSON.parse(e.data) as Record<string, unknown>;
+      if (e.event === 'status') onPhase(data['phase'] as ChatPhase);
+      else if (e.event === 'answer') return data as unknown as ChatReply;
+      else if (e.event === 'error') throw new ApiError(200, String(data['code']), String(data['message']));
+    }
+    if (done) break;
+  }
+  throw new ApiError(0, 'network', '답변을 받기 전에 연결이 끊겼습니다.');
 }

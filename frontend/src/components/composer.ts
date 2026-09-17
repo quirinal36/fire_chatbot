@@ -12,14 +12,11 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
       <div class="composer__box">
         <label class="sr-only" for="composer-input">질문 입력</label>
         <textarea id="composer-input" class="composer__input" rows="2"
-          placeholder="소방법, 신규 건축물에 대해 질문하세요…"></textarea>
+          placeholder="예: 3층 학원에 자동화재탐지설비가 필요한가요?" maxlength="1000"></textarea>
         <div class="composer__row">
           <div class="composer__tools">
             <button type="button" class="btn btn--quiet btn--icon" aria-label="도면 첨부" data-feature="planPanel">
               ${icons.clip()}
-            </button>
-            <button type="button" class="btn btn--quiet">
-              ${icons.law()} 법령 검색
             </button>
           </div>
           <button type="submit" class="btn btn--accent btn--icon composer__send"
@@ -27,7 +24,7 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
         </div>
       </div>
       <p class="composer__note">
-        로그인 없이도 질문할 수 있습니다. 비회원 대화는 브라우저를 닫으면 사라집니다.
+        로그인 없이도 질문할 수 있습니다.
       </p>
     </form>
   `;
@@ -46,9 +43,11 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
     input.style.height = `${Math.min(input.scrollHeight, MAX_HEIGHT)}px`;
   }
 
+  let busy = false;
+
   function submit(): void {
     const text = input.value.trim();
-    if (text === '') return;
+    if (text === '' || busy) return;
     actions.sendMessage(text);
     input.value = '';
     send.disabled = true;
@@ -75,9 +74,11 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
 
   return {
     update(state) {
+      busy = state.phase !== 'idle';
+      send.disabled = busy || input.value.trim() === '';
       note.textContent =
-        state.user === null
-          ? '로그인 없이도 질문할 수 있습니다. 비회원 대화는 브라우저를 닫으면 사라집니다.'
+        state.user === null || state.user.anonymous
+          ? '로그인 없이도 질문할 수 있습니다. 답변은 참고용이며 최종 판단은 관할 소방서에 확인하세요.'
           : `${state.user.name} 님으로 로그인되어 있습니다. 대화가 계정에 저장됩니다.`;
     },
   };

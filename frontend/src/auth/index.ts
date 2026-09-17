@@ -1,73 +1,105 @@
 /**
- * 로그인 연동 지점.
+ * 로그인 (기획서 §3 · ISS-013).
  *
- * 지금은 화면 흐름을 확인하기 위한 목(mock) 구현입니다.
- * 실제 연동은 아래 두 곳을 각각 채우면 됩니다.
- *
- *  - Google: Google Identity Services 의 `google.accounts.id` 로 ID 토큰을 받고
- *    백엔드에 보내 검증한 뒤 세션을 받습니다.
- *  - Kakao: Kakao JavaScript SDK 의 `Kakao.Auth.authorize` 로 인가 코드를 받고
- *    백엔드에서 토큰 교환과 사용자 조회를 합니다.
- *
- * 두 경우 모두 토큰 검증은 반드시 서버에서 하세요. 브라우저에서 끝내면 안 됩니다.
+ * Supabase Auth 하나로 처리한다.
+ * - 처음 방문하면 익명 세션을 만든다. 로그인하지 않아도 질문하고 대화를 이어 볼 수 있다
+ * - Google·카카오로 로그인하면 익명 계정에 소셜 계정을 연결한다. 사용자 id 가 그대로라 대화가 계정에 남는다
+ * - 토큰 검증은 API 서버가 한다. 화면은 토큰을 전달만 한다
  */
-
+import { GoTrueClient, type Session } from '@supabase/auth-js';
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '../config';
 import type { AuthProviderId, User } from '../types';
 
 export interface AuthService {
-  /** 새로고침 후 기존 세션을 복구합니다. */
+  /** 기존 세션을 복구하고, 없으면 익명 세션을 만든다 */
   restore(): Promise<User | null>;
-  signIn(provider: AuthProviderId): Promise<User>;
-  signOut(): Promise<void>;
+  /** 소셜 로그인 페이지로 이동한다 */
+  signIn(provider: AuthProviderId): Promise<void>;
+  signOut(): Promise<User | null>;
+  accessToken(): Promise<string | null>;
+  onChange(listener: (user: User | null) => void): void;
 }
 
-const STORAGE_KEY = 'fire-chatbot.session';
-
-function readStored(): User | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return null;
-    return JSON.parse(raw) as User;
-  } catch {
-    // 시크릿 모드나 저장소 차단 환경에서는 조용히 비로그인으로 둡니다.
-    return null;
-  }
-}
-
-function writeStored(user: User | null): void {
-  try {
-    if (user === null) localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-  } catch {
-    // 저장 실패는 로그인 자체를 막지 않습니다.
-  }
-}
-
-const MOCK_USERS: Record<AuthProviderId, User> = {
-  google: { id: 'g-1001', name: '김소방', department: '예방과', provider: 'google' },
-  kakao: { id: 'k-2002', name: '이안전', department: '검사과', provider: 'kakao' },
-};
-
-/** 개발용 구현. 네트워크 없이 로그인 상태만 흉내 냅니다. */
-export class MockAuthService implements AuthService {
-  async restore(): Promise<User | null> {
-    return readStored();
-  }
-
-  async signIn(provider: AuthProviderId): Promise<User> {
-    const user = MOCK_USERS[provider];
-    writeStored(user);
-    return user;
-  }
-
-  async signOut(): Promise<void> {
-    writeStored(null);
-  }
-}
-
-export const PROVIDER_LABEL: Record<AuthProviderId, string> = {
+export const PROVIDER_LABEL: Record<User['provider'], string> = {
   google: 'Google 계정',
   kakao: '카카오 계정',
+  anonymous: '비회원',
 };
 
-export const auth: AuthService = new MockAuthService();
+export class AuthError extends Error {}
+
+function toUser(session: Session | null): User | null {
+  const u = session?.user;
+  if (!u) return null;
+  const anonymous = u.is_anonymous === true;
+  const provider = (u.identities ?? []).map((i) => i.provider).find((p): p is AuthProviderId => p === 'google' || p === 'kakao');
+  const meta = u.user_metadata as Record<string, unknown>;
+  const name = String(meta['full_name'] ?? meta['name'] ?? meta['nickname'] ?? (anonymous ? '손님' : (u.email ?? '사용자')));
+  return { id: u.id, name, provider: anonymous ? 'anonymous' : (provider ?? 'google'), anonymous };
+}
+
+export class SupabaseAuthService implements AuthService {
+  private readonly client: { auth: GoTrueClient };
+  private anonymousAttempt: Promise<Session | null> | null = null;
+
+  constructor(url: string, key: string) {
+    // 인증만 쓰므로 supabase-js 전체 대신 auth 클라이언트만 싣는다 (번들 크기)
+    this.client = {
+      auth: new GoTrueClient({
+        url: `${url}/auth/v1`,
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        storageKey: `sb-${new URL(url).hostname.split('.')[0]}-auth-token`,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+      }),
+    };
+  }
+
+  private async ensureSession(): Promise<Session | null> {
+    const { data } = await this.client.auth.getSession();
+    if (data.session) return data.session;
+    // 동시에 여러 번 불려도 익명 계정은 하나만 만든다
+    this.anonymousAttempt ??= this.client.auth.signInAnonymously().then(({ data: d, error }) => {
+      this.anonymousAttempt = null;
+      if (error) throw new AuthError('비회원 세션을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      return d.session;
+    });
+    return this.anonymousAttempt;
+  }
+
+  async restore(): Promise<User | null> {
+    return toUser(await this.ensureSession());
+  }
+
+  async signIn(provider: AuthProviderId): Promise<void> {
+    const session = await this.ensureSession();
+    const redirectTo = window.location.origin + window.location.pathname;
+    const { error } = session?.user.is_anonymous
+      ? await this.client.auth.linkIdentity({ provider, options: { redirectTo } })
+      : await this.client.auth.signInWithOAuth({ provider, options: { redirectTo } });
+    if (error) {
+      throw new AuthError(
+        /provider is not enabled|Unsupported provider/i.test(error.message)
+          ? `${PROVIDER_LABEL[provider]} 로그인은 아직 준비 중입니다. 비회원으로 계속 이용해 주세요.`
+          : '로그인을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      );
+    }
+  }
+
+  async signOut(): Promise<User | null> {
+    await this.client.auth.signOut();
+    return toUser(await this.ensureSession());
+  }
+
+  async accessToken(): Promise<string | null> {
+    return (await this.ensureSession())?.access_token ?? null;
+  }
+
+  onChange(listener: (user: User | null) => void): void {
+    this.client.auth.onAuthStateChange((_event, session) => listener(toUser(session)));
+  }
+}
+
+export const auth: AuthService = new SupabaseAuthService(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);

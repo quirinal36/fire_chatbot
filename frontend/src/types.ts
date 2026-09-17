@@ -1,93 +1,128 @@
 /** 앱 전체에서 쓰는 도메인 타입 */
 
-export type Role = 'user' | 'assistant';
-
 export type AuthProviderId = 'google' | 'kakao';
 
 export interface User {
   readonly id: string;
+  /** 익명 세션이면 '손님' */
   readonly name: string;
-  /** 소속 부서. 예: 예방과 */
-  readonly department: string;
-  readonly provider: AuthProviderId;
+  readonly provider: AuthProviderId | 'anonymous';
+  readonly anonymous: boolean;
 }
 
-export interface Attachment {
-  readonly name: string;
-  /** 사람이 읽는 크기 표기. 예: 2.4 MB */
-  readonly size: string;
-  readonly kind: 'drawing' | 'document';
-}
-
-export interface LawRef {
+/** 서버 AnswerEnvelope 의 근거 한 건 (server/src/lib/chat/schema.ts) */
+export interface SourceRef {
   readonly id: string;
-  readonly label: string;
-  /** 국가법령정보센터 링크. 연동 전에는 비워 둡니다. */
-  readonly href?: string;
+  readonly ref: string;
+  readonly title: string;
+  readonly code: string | null;
+  readonly locator: string;
+  readonly heading: string | null;
+  readonly excerpt: string;
+  readonly effectiveDate: string | null;
+  readonly versionStatus: string;
+  readonly needsReview: boolean;
+  readonly url: string | null;
+}
+
+export type AssessmentStatus = 'applicable' | 'not_applicable' | 'needs_review';
+
+export interface Assessment {
+  readonly facility: string;
+  readonly status: AssessmentStatus;
+  readonly ruleId: string;
+  readonly ruleSetVersion: string;
+  readonly explanation: string;
+  readonly missingInputs: readonly string[];
+  readonly sourceIds: readonly string[];
+}
+
+export type AnswerStatus = 'answered' | 'insufficient_evidence' | 'date_unclear' | 'fallback';
+
+export interface AnswerEnvelope {
+  readonly status: AnswerStatus;
+  readonly answer: {
+    readonly mode: 'legal_search' | 'case_guidance';
+    readonly summary: string;
+    readonly statements: readonly { readonly text: string; readonly sourceIds: readonly string[] }[];
+    readonly followUpQuestions: readonly { readonly field: string; readonly question: string }[];
+    readonly limitations: readonly string[];
+  };
+  readonly assessment: readonly Assessment[];
+  readonly sources: readonly SourceRef[];
+  readonly asOf: string;
+  readonly pendingChanges: readonly { readonly documentTitle: string; readonly effectiveDate: string }[];
+  readonly caseRevision: number | null;
+  readonly corpusVersion: string;
+  readonly disclaimer: string;
 }
 
 export interface UserMessage {
   readonly id: string;
   readonly role: 'user';
   readonly text: string;
-  readonly attachments?: readonly Attachment[];
 }
 
-export interface AssistantAction {
-  readonly id: 'open-panel' | 'draft-opinion';
-  readonly label: string;
-}
+export type FeedbackState = 'idle' | 'open' | 'sending' | 'sent' | 'failed';
 
 export interface AssistantMessage {
   readonly id: string;
   readonly role: 'assistant';
-  /** 문단. 굵게 표시할 곳은 **표시** 로 감쌉니다. */
-  readonly paragraphs: readonly string[];
-  readonly lawRefs?: readonly LawRef[];
-  readonly bullets?: readonly string[];
-  readonly actions?: readonly AssistantAction[];
-  readonly disclaimer?: string;
+  /** 서버 메시지 id. 오류 신고에 쓴다 */
+  readonly serverId: string | null;
+  readonly envelope: AnswerEnvelope;
+  readonly feedback: FeedbackState;
 }
 
-export type Message = UserMessage | AssistantMessage;
+/** 요청이 실패했을 때 남기는 안내. 같은 요청 번호로 다시 보낼 수 있다 */
+export interface ErrorMessage {
+  readonly id: string;
+  readonly role: 'error';
+  readonly text: string;
+  readonly retry: { readonly clientRequestId: string; readonly question: string } | null;
+}
+
+export type Message = UserMessage | AssistantMessage | ErrorMessage;
 
 export interface Conversation {
   readonly id: string;
   readonly title: string;
-  /** 목록에 보이는 부가 정보. 예: 오늘 · 도면 1개 */
+  /** 목록에 보이는 부가 정보. 예: 오늘 */
   readonly meta: string;
   readonly messages: readonly Message[];
+  /** 서버에서 메시지를 불러왔는지 */
+  readonly loaded: boolean;
 }
 
 export type PanelTab = 'plan' | 'law' | 'check';
 
-export type Tone = 'pass' | 'flag';
+export type Phase = 'idle' | 'sending' | 'searching' | 'writing';
 
-export interface CheckItem {
-  readonly label: string;
-  readonly status: string;
-  readonly tone: Tone;
-}
-
-export interface PlanStat {
-  readonly label: string;
-  readonly value: string;
-  readonly tone?: Tone;
-}
-
-export interface LawEntry {
-  readonly source: string;
+export interface SourceDetail {
+  readonly id: string;
+  readonly documentTitle: string;
+  readonly code: string | null;
+  readonly issuer: string | null;
+  readonly locator: string;
+  readonly heading: string | null;
   readonly text: string;
+  readonly parseStatus: 'ok' | 'needs_review';
+  readonly parseNotes: string | null;
+  readonly effectiveDate: string | null;
+  readonly promulgatedAt: string | null;
+  readonly versionStatus: string;
+  readonly sourceVersionId: string;
+  readonly sourceUrl: string | null;
+  readonly attachmentUrl: string | null;
+  readonly ancestors: readonly { readonly id: string; readonly locator: string; readonly heading: string | null }[];
+  readonly children: readonly { readonly id: string; readonly locator: string; readonly heading: string | null; readonly text: string }[];
+  readonly currentUnitId: string | null;
 }
 
-/** 도면 패널이 보여주는 검토 결과 한 건 */
-export interface Review {
-  readonly planTitle: string;
-  readonly planScale: string;
-  readonly stats: readonly PlanStat[];
-  readonly laws: readonly LawEntry[];
-  readonly checks: readonly CheckItem[];
-}
+export type SourceView =
+  | { readonly id: string; readonly state: 'loading' }
+  | { readonly id: string; readonly state: 'ready'; readonly detail: SourceDetail }
+  | { readonly id: string; readonly state: 'error'; readonly message: string };
 
 export interface AppState {
   readonly conversations: readonly Conversation[];
@@ -98,6 +133,11 @@ export interface AppState {
   readonly panelTab: PanelTab;
   readonly sidebarWidth: number;
   readonly panelWidth: number;
-  /** AI 응답을 기다리는 중인지 */
-  readonly pending: boolean;
+  /** 답변 처리 단계 */
+  readonly phase: Phase;
+  /** 패널에 근거를 보여 줄 답변 */
+  readonly selectedAnswerId: string | null;
+  readonly sourceView: SourceView | null;
+  /** 화면 상단 알림 (로그인 실패 등) */
+  readonly notice: string | null;
 }

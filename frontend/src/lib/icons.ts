@@ -54,6 +54,13 @@ export const icons = {
 
   close: (size = 16): string => stroke('<path d="M6 6l12 12M18 6L6 18"></path>', size),
 
+  flag: (size = 14): string => stroke('<path d="M5 21V4M5 4h11l-2 4 2 4H5"></path>', size),
+
+  back: (size = 16): string => stroke('<path d="M15 6l-6 6 6 6"></path>', size),
+
+  external: (size = 14): string =>
+    stroke('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path>', size),
+
   logout: (size = 16): string =>
     stroke(
       '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path>',

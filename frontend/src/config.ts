@@ -19,3 +19,6 @@ export const FEATURES = {
  * 빌드 시점에 번들에 들어가므로 비밀값을 넣지 않는다.
  */
 export const API_BASE_URL: string = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001').replace(/\/+$/, '');
+
+export const SUPABASE_URL: string = import.meta.env.VITE_SUPABASE_URL ?? 'https://voiiciyuotuyejcoysbh.supabase.co';
+export const SUPABASE_PUBLISHABLE_KEY: string = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '';

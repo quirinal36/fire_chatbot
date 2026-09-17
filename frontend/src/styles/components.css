@@ -778,3 +778,296 @@
   color: var(--ink-muted);
   text-align: center;
 }
+
+/* ------------------------------ 답변 (ISS-016) ------------------------------ */
+
+.chip {
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chip--quiet {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+}
+
+.chip--quiet[aria-pressed='true'] {
+  border-color: var(--ink-muted);
+}
+
+.statements {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-6);
+}
+
+.cite {
+  margin-left: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  font: var(--text-micro);
+  color: var(--ink-muted);
+  cursor: pointer;
+  vertical-align: 1px;
+}
+
+.cite:hover {
+  color: var(--ink);
+  border-color: var(--ink-muted);
+}
+
+.status-note {
+  align-self: flex-start;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font: var(--text-caption);
+  font-weight: 600;
+}
+
+.search-note {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.assess {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.assess ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assess__label,
+.followups__label {
+  font: var(--text-caption);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.assess__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font: var(--text-body-sm);
+}
+
+.assess__status {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.assess__status--applicable,
+.assess__status--needs_review {
+  color: var(--accent);
+}
+
+.assess__status--not_applicable {
+  color: var(--success);
+}
+
+.followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.followups__label {
+  flex-basis: 100%;
+}
+
+.limits {
+  margin: 0;
+  padding-left: var(--space-6);
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.phase {
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.feedback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.feedback__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.feedback select,
+.feedback textarea {
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font: var(--text-body-sm);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.feedback .btn {
+  align-self: flex-end;
+}
+
+.feedback__done,
+.feedback__error {
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.feedback__error {
+  color: var(--accent);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font: var(--text-caption);
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+/* ------------------------------ 근거 카드 (ISS-011) ------------------------------ */
+
+.law-entry {
+  padding: 0;
+}
+
+.law-entry__open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.law-entry__open:hover {
+  background: var(--border-subtle);
+}
+
+.law-entry__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tag {
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font: var(--text-micro);
+  color: var(--ink);
+}
+
+.tag--quiet {
+  color: var(--ink-muted);
+}
+
+.tag--flag {
+  color: var(--accent);
+}
+
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.source .panel__note {
+  padding: 0;
+}
+
+.source__doc,
+.source__path {
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.source__title {
+  font: var(--text-title);
+}
+
+.source__text {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font: var(--text-body-sm);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.source__children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  font: var(--text-body-sm);
+}
+
+.source__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.panel__body > .btn {
+  margin: var(--space-3) var(--space-4) 0;
+}
+
+.check__why {
+  display: block;
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}

@@ -44,6 +44,7 @@ export function mountSidebar(root: HTMLElement, actions: AppActions): Component 
   return {
     update(state) {
       list.innerHTML = state.conversations
+        .filter((conv) => conv.messages.length > 0 || conv.id === state.activeConversationId || !conv.loaded)
         .map((conv) => {
           const active = conv.id === state.activeConversationId;
           return `<li>
@@ -59,19 +60,21 @@ export function mountSidebar(root: HTMLElement, actions: AppActions): Component 
       const { user } = state;
       accountSlot.innerHTML =
         user === null
-          ? `<div class="account">
-              <p class="account__hint">로그인하면 대화 기록이 계정에 저장됩니다.</p>
-              <button type="button" class="btn btn--primary" data-action="login">로그인</button>
-            </div>`
-          : `<div class="account account--in">
-              <span class="avatar" aria-hidden="true">${esc(user.name.slice(0, 1))}</span>
-              <span class="account__who">
-                <span class="account__name">${esc(user.name)} · ${esc(user.department)}</span>
-                <span class="account__provider">${esc(PROVIDER_LABEL[user.provider])}</span>
-              </span>
-              <button type="button" class="btn btn--quiet btn--icon" data-action="logout"
-                aria-label="로그아웃">${icons.logout()}</button>
-            </div>`;
+          ? ''
+          : user.anonymous
+            ? `<div class="account">
+                <p class="account__hint">비회원 대화는 이 브라우저에서만 이어 볼 수 있습니다. 로그인하면 계정에 저장됩니다.</p>
+                <button type="button" class="btn btn--primary" data-action="login">로그인</button>
+              </div>`
+            : `<div class="account account--in">
+                <span class="avatar" aria-hidden="true">${esc(user.name.slice(0, 1))}</span>
+                <span class="account__who">
+                  <span class="account__name">${esc(user.name)}</span>
+                  <span class="account__provider">${esc(PROVIDER_LABEL[user.provider])}</span>
+                </span>
+                <button type="button" class="btn btn--quiet btn--icon" data-action="logout"
+                  aria-label="로그아웃">${icons.logout()}</button>
+              </div>`;
     },
   };
 }
