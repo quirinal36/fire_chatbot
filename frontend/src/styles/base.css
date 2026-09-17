@@ -6,6 +6,12 @@
   box-sizing: border-box;
 }
 
+/* .btn 처럼 display 를 직접 지정하는 규칙이 브라우저 기본 [hidden] 을 이겨서
+   숨긴 요소가 그대로 보이는 일을 막습니다. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   height: 100%;
