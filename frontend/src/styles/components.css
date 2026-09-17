@@ -1071,3 +1071,107 @@
   font: var(--text-caption);
   color: var(--ink-muted);
 }
+
+/* ------------------------------ 영업장 조건 (ISS-020) ------------------------------ */
+
+.case {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.case .panel__note {
+  padding-bottom: 0;
+}
+
+.case--empty {
+  padding: var(--space-4);
+  font: var(--text-body-sm);
+}
+
+.case--empty .panel__note {
+  padding: 0;
+}
+
+.case__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.case__title {
+  font: var(--text-title);
+}
+
+.case__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.case__group legend {
+  padding: 0 var(--space-1);
+  font: var(--text-caption);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.case__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font: var(--text-body-sm);
+}
+
+.case__row label {
+  grid-column: 1 / -1;
+}
+
+.case__row--needed label {
+  font-weight: 600;
+}
+
+.case__row select,
+.case__input input {
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font: var(--text-body-sm);
+  color: var(--ink);
+}
+
+.case__input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.case__input input {
+  width: 100%;
+}
+
+.case__hint,
+.case__help {
+  grid-column: 1 / -1;
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.case__hint {
+  color: var(--accent);
+}
+
+.case__actions {
+  display: flex;
+  justify-content: flex-end;
+}

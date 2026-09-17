@@ -8,7 +8,7 @@ export interface ChatRequest {
   readonly sessionId: string;
   readonly clientRequestId: string;
   readonly question: string;
-  readonly caseId?: string;
+  readonly caseId?: string | undefined;
 }
 
 export interface ChatReply {

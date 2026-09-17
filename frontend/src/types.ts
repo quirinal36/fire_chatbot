@@ -84,8 +84,16 @@ export interface ErrorMessage {
 
 export type Message = UserMessage | AssistantMessage | ErrorMessage;
 
+export interface CaseView {
+  readonly data: import('./api/cases').CaseData | null;
+  readonly state: 'loading' | 'ready' | 'saving' | 'error';
+  readonly message: string | null;
+}
+
 export interface Conversation {
   readonly id: string;
+  /** 연결된 영업장 사례 id */
+  readonly caseId: string | null;
   readonly title: string;
   /** 목록에 보이는 부가 정보. 예: 오늘 */
   readonly meta: string;
@@ -140,4 +148,7 @@ export interface AppState {
   readonly sourceView: SourceView | null;
   /** 화면 상단 알림 (로그인 실패 등) */
   readonly notice: string | null;
+  /** 사례 id → 조건·판단 */
+  readonly cases: Readonly<Record<string, CaseView>>;
+  readonly fieldDefs: readonly import('./api/cases').FieldDef[];
 }

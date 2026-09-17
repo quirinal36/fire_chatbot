@@ -4,6 +4,7 @@ import { apiJson } from './client';
 interface SessionRow {
   id: string;
   title: string;
+  caseId: string | null;
   updatedAt: string;
 }
 
@@ -25,7 +26,7 @@ export function relativeDay(iso: string, now = new Date()): string {
 
 export async function listSessions(): Promise<Conversation[]> {
   const { sessions } = await apiJson<{ sessions: SessionRow[] }>('/api/sessions');
-  return sessions.map((s) => ({ id: s.id, title: s.title, meta: relativeDay(s.updatedAt), messages: [], loaded: false }));
+  return sessions.map((s) => ({ id: s.id, title: s.title, caseId: s.caseId, meta: relativeDay(s.updatedAt), messages: [], loaded: false }));
 }
 
 export async function loadMessages(sessionId: string): Promise<Message[]> {

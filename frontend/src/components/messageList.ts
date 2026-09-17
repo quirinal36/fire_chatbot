@@ -9,6 +9,8 @@ function renderUser(msg: UserMessage): string {
   return `<article class="msg msg--user"><p class="bubble">${esc(msg.text)}</p></article>`;
 }
 
+const CASE_FIELD = /^[a-z][a-z0-9_]*$/;
+
 const STATUS_NOTE: Partial<Record<AnswerEnvelope['status'], { tone: string; text: string }>> = {
   insufficient_evidence: { tone: 'flag', text: '관련 근거를 찾지 못했습니다' },
   date_unclear: { tone: 'flag', text: '적용 시점 확인 필요' },
@@ -43,7 +45,7 @@ function renderFeedback(msg: AssistantMessage): string {
     </form>`;
 }
 
-function renderAssistant(msg: AssistantMessage, selected: boolean): string {
+function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: boolean): string {
   const e = msg.envelope;
   const a = e.answer;
   const note = STATUS_NOTE[e.status];
@@ -67,7 +69,11 @@ function renderAssistant(msg: AssistantMessage, selected: boolean): string {
   // 규칙 결과는 AI 설명과 분리해 표로 보여 준다 (ISS-016)
   const assessment = e.assessment.length
     ? `<div class="assess">
-        <p class="assess__label">검토된 규칙에 따른 설치 대상 판단</p>
+        <p class="assess__label">${
+          e.assessment.some((x) => x.ruleSetVersion.includes('검토 전'))
+            ? '검토 전 규칙(개발용)으로 계산한 설치 대상 판단 · 실제 판단에 쓰지 마세요'
+            : '담당자가 승인한 규칙에 따른 설치 대상 판단'
+        }</p>
         <ul>${e.assessment
           .map(
             (x) => `<li class="assess__row">
@@ -83,7 +89,12 @@ function renderAssistant(msg: AssistantMessage, selected: boolean): string {
 
   const followUps = a.followUpQuestions.length
     ? `<div class="followups"><p class="followups__label">더 정확히 안내하려면</p>${a.followUpQuestions
-        .map((q) => `<button type="button" class="chip" data-action="follow-up" data-text="${esc(q.question)}">${esc(q.question)}</button>`)
+        .map((q) =>
+          // 영업장 조건 항목이면 질문으로 보내지 않고 조건 입력 칸을 연다
+          hasCase && CASE_FIELD.test(q.field)
+            ? `<button type="button" class="chip" data-action="open-case">${esc(q.question)} ›</button>`
+            : `<button type="button" class="chip" data-action="follow-up" data-text="${esc(q.question)}">${esc(q.question)}</button>`,
+        )
         .join('')}</div>`
     : '';
 
@@ -134,10 +145,10 @@ function renderError(msg: ErrorMessage, busy: boolean): string {
   </article>`;
 }
 
-function renderMessage(msg: Message, selectedId: string | null, busy: boolean): string {
+function renderMessage(msg: Message, selectedId: string | null, busy: boolean, hasCase: boolean): string {
   if (msg.role === 'user') return renderUser(msg);
   if (msg.role === 'error') return renderError(msg, busy);
-  return renderAssistant(msg, msg.id === selectedId);
+  return renderAssistant(msg, msg.id === selectedId, hasCase);
 }
 
 const EMPTY_STATE = `<article class="msg msg--assistant">
@@ -191,6 +202,9 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
       case 'follow-up':
         if (!busy) actions.sendMessage(el.dataset['text'] ?? '');
         break;
+      case 'open-case':
+        actions.openPanel('check');
+        break;
       case 'retry':
         actions.retry(id);
         break;
@@ -222,7 +236,7 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
         ? '<p class="phase">대화를 불러오는 중…</p>'
         : messages.length === 0 && !busy
           ? EMPTY_STATE
-          : messages.map((m) => renderMessage(m, state.selectedAnswerId, busy)).join('');
+          : messages.map((m) => renderMessage(m, state.selectedAnswerId, busy, Boolean(active?.caseId))).join('');
       const html = body + (state.phase !== 'idle' ? pending(state.phase) : '');
 
       // 입력 중인 신고 양식이 지워지지 않도록 바뀐 경우에만 다시 그린다

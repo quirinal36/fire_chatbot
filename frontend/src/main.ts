@@ -7,6 +7,7 @@ import { FEATURES } from './config';
 import { auth, AuthError } from './auth';
 import { requestAnswer } from './api/chat';
 import { ApiError } from './api/client';
+import { createCase, getCase, loadFieldDefs, patchCase } from './api/cases';
 import { sendFeedback } from './api/feedback';
 import { listSessions, loadMessages } from './api/sessions';
 import { fetchSource } from './api/sources';
@@ -21,7 +22,7 @@ import { mountPanel } from './components/panel';
 import { attachResizer } from './components/resizer';
 import { mountSidebar, type Component } from './components/sidebar';
 import type { AppActions } from './actions';
-import type { AppState, AssistantMessage, Conversation, Message, PanelTab } from './types';
+import type { AppState, AssistantMessage, CaseView, Conversation, Message, PanelTab } from './types';
 
 const WIDTH_KEY = 'fire-chatbot.widths';
 
@@ -50,7 +51,7 @@ function writeWidths(widths: StoredWidths): void {
 const stored = readWidths();
 
 function blankConversation(): Conversation {
-  return { id: newId(), title: '새 대화', meta: '방금', messages: [], loaded: true };
+  return { id: newId(), caseId: null, title: '새 대화', meta: '방금', messages: [], loaded: true };
 }
 
 const first = blankConversation();
@@ -68,6 +69,8 @@ const store = createStore<AppState>({
   selectedAnswerId: null,
   sourceView: null,
   notice: null,
+  cases: {},
+  fieldDefs: [],
 });
 
 function updateConversation(id: string, fn: (c: Conversation) => Conversation): void {
@@ -95,10 +98,35 @@ function errorText(err: unknown): string {
   return '답변을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.';
 }
 
+function setCase(caseId: string, patch: Partial<CaseView>): void {
+  store.setState((s) => {
+    const prev: CaseView = s.cases[caseId] ?? { data: null, state: 'loading', message: null };
+    return { cases: { ...s.cases, [caseId]: { ...prev, ...patch } } };
+  });
+}
+
+async function refreshCase(caseId: string): Promise<void> {
+  if (!store.getState().cases[caseId]) setCase(caseId, { state: 'loading' });
+  try {
+    const data = await getCase(caseId);
+    setCase(caseId, { data, state: 'ready', message: null });
+  } catch (err) {
+    setCase(caseId, { state: 'error', message: errorText(err) });
+  }
+}
+
+function activeCaseId(): string | null {
+  const s = store.getState();
+  return s.conversations.find((c) => c.id === s.activeConversationId)?.caseId ?? null;
+}
+
 async function ask(conversationId: string, question: string, clientRequestId: string): Promise<void> {
   store.setState({ phase: 'sending' });
+  const caseId = store.getState().conversations.find((c) => c.id === conversationId)?.caseId ?? undefined;
   try {
-    const reply = await requestAnswer({ sessionId: conversationId, clientRequestId, question }, (phase) => store.setState({ phase }));
+    const reply = await requestAnswer({ sessionId: conversationId, clientRequestId, question, caseId }, (phase) => store.setState({ phase }));
+    // 질문에서 읽은 조건 후보가 사례에 붙었을 수 있다
+    if (caseId) void refreshCase(caseId);
     const answer: AssistantMessage = {
       id: reply.messageId ?? newId(),
       role: 'assistant',
@@ -136,6 +164,7 @@ async function loadConversation(id: string): Promise<void> {
   try {
     const messages = await loadMessages(id);
     updateConversation(id, (c) => ({ ...c, messages, loaded: true }));
+    if (conv.caseId) void refreshCase(conv.caseId);
     const last = [...messages].reverse().find((m): m is AssistantMessage => m.role === 'assistant');
     store.setState({ selectedAnswerId: last?.id ?? null, sourceView: null });
   } catch (err) {
@@ -285,6 +314,41 @@ const actions: AppActions = {
     });
   },
 
+  startCase() {
+    const state = store.getState();
+    const conversationId = state.activeConversationId;
+    const current = state.conversations.find((c) => c.id === conversationId);
+    if (!current || current.caseId) return;
+    void createCase(conversationId)
+      .then((data) => {
+        updateConversation(conversationId, (c) => ({ ...c, caseId: data.id, title: c.title === '새 대화' ? '영업장 확인' : c.title }));
+        setCase(data.id, { data, state: 'ready', message: null });
+        store.setState({ panelOpen: true, panelTab: 'check' });
+        void refreshSessions();
+      })
+      .catch((err: unknown) => store.setState({ notice: errorText(err) }));
+  },
+
+  saveCaseFields(patch) {
+    const caseId = activeCaseId();
+    const view = caseId ? store.getState().cases[caseId] : undefined;
+    if (!caseId || !view?.data || view.state === 'saving') return;
+    setCase(caseId, { state: 'saving', message: null });
+    patchCase(caseId, view.data.revision, patch)
+      .then((data) => setCase(caseId, { data, state: 'ready', message: '저장했습니다. 판단 결과를 새로 계산했습니다.' }))
+      .catch((err: unknown) => {
+        const conflict = err instanceof ApiError && err.code === 'revision_conflict';
+        setCase(caseId, { state: 'ready', message: errorText(err) });
+        // 다른 곳에서 먼저 바뀌었으면 최신 내용을 불러온다. 입력한 내용은 다시 넣어야 한다
+        if (conflict) void refreshCase(caseId);
+      });
+  },
+
+  reloadCase() {
+    const caseId = activeCaseId();
+    if (caseId) void refreshCase(caseId);
+  },
+
   dismissNotice() {
     store.setState({ notice: null });
   },
@@ -347,6 +411,7 @@ auth
   .restore()
   .then((user) => {
     store.setState({ user });
+    void loadFieldDefs().then((fieldDefs) => store.setState({ fieldDefs })).catch(() => {});
     return refreshSessions();
   })
   .catch((err: unknown) => store.setState({ notice: errorText(err) }));

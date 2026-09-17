@@ -5,11 +5,12 @@ import { planSvg } from '../data/plan';
 import type { AppActions } from '../actions';
 import type { AnswerEnvelope, AppState, AssistantMessage, PanelTab, SourceRef, SourceView } from '../types';
 import type { Component } from './sidebar';
+import { collectPatch, renderCaseCard } from './caseCard';
 
 const ALL_TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
   { id: 'plan', label: '도면' },
   { id: 'law', label: '근거 법령' },
-  { id: 'check', label: '설치 대상' },
+  { id: 'check', label: '내 영업장' },
 ];
 
 // 기획서 §2.2 에 따라 도면 탭은 1차 출시에서 제외한다. src/config.ts 참고.
@@ -141,11 +142,33 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       const tab = el.dataset['tab'];
       if (tab === 'plan' || tab === 'law' || tab === 'check') actions.selectPanelTab(tab);
     },
-    'open-source': (el) => actions.openSource(el.dataset['source'] ?? ''),
+    'open-source': (el) => {
+      actions.openSource(el.dataset['source'] ?? '');
+    },
     'close-source': () => actions.closeSource(),
+    'start-case': () => actions.startCase(),
+    'reload-case': () => actions.reloadCase(),
+    'confirm-field': (el) => {
+      const key = el.dataset['key'] ?? '';
+      const current = latest?.data?.fields[key];
+      if (current?.value !== undefined && current.value !== null) {
+        actions.saveCaseFields({ [key]: { value: current.value, state: 'user_confirmed' } });
+      }
+    },
   });
 
+  body.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('case__form')) return;
+    event.preventDefault();
+    const patch = collectPatch(form);
+    if (Object.keys(patch).length) actions.saveCaseFields(patch);
+  });
+
+  let latest: import('../types').CaseView | undefined;
+
   let lastHtml = '';
+  let lastTab: PanelTab | null = null;
 
   return {
     update(state) {
@@ -158,19 +181,25 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset['tab'] === tab));
 
       const envelope = selectedAnswer(state)?.envelope ?? null;
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      latest = conv?.caseId ? state.cases[conv.caseId] ?? { data: null, state: 'loading', message: null } : undefined;
       const html =
         tab === 'plan'
           ? renderPlan()
           : tab === 'check'
-            ? renderChecks(envelope)
+            ? renderCaseCard(latest, state.fieldDefs, conv !== undefined) + (latest ? '' : renderChecks(envelope))
             : state.sourceView
               ? renderSourceView(state.sourceView)
               : renderLawList(envelope);
       if (html !== lastHtml) {
+        // 입력 중인 양식의 스크롤 위치는 유지한다
+        const keepScroll = tab === 'check' && lastTab === 'check';
+        const top = body.scrollTop;
         body.innerHTML = html;
-        body.scrollTop = 0;
+        body.scrollTop = keepScroll ? top : 0;
         lastHtml = html;
       }
+      lastTab = tab;
     },
   };
 }

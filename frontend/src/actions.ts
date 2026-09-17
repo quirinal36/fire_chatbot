@@ -17,6 +17,10 @@ export interface AppActions {
   openSource(sourceId: string, answerId?: string): void;
   closeSource(): void;
   toggleFeedback(answerId: string): void;
+  /** 현재 대화에 영업장 사례를 만든다 */
+  startCase(): void;
+  saveCaseFields(patch: import('./api/cases').FieldPatch): void;
+  reloadCase(): void;
   submitFeedback(answerId: string, category: FeedbackCategory, comment: string): void;
   openLogin(): void;
   closeLogin(): void;
