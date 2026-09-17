@@ -14,6 +14,16 @@
 - 선행: 없음 · 기획서: §1~2, §9, §12, §14
 
 최초 업종·시설, 소방 검토 담당자·일정, 자료 형식·수량, API 신청 상태, 클라우드 소유 계정·도메인·기관 요구사항, 부가세·운영비 포함 여부와 유지보수 범위를 결정 기록으로 관리한다.
+
+### 결정 기록 · 2026-09-17
+
+- 최초 지원 범위: 렛츠코딩앤플레이 학원.
+- 소방 담당 검토자: 일을 의뢰한 의뢰자.
+- 법령 API 키: 로컬 `.env`의 `API_AUTHKEY`에 저장됨.
+- OpenRouter 개발용 키: 로컬 `.env`의 `OPENROUTER_APIKEY`에 저장됨. 구현 전 `OPENROUTER_API_KEY`로 이름을 통일하거나 환경변수 매핑을 확정한다. 비밀값은 문서와 GitHub에 기록하지 않는다.
+- Supabase 프로젝트: `FireChatbot` (`voiiciyuotuyejcoysbh`, `https://voiiciyuotuyejcoysbh.supabase.co`)를 사용한다. CLI 로그인과 활성 상태를 확인했다. Publishable/Secret key 입력은 [Supabase 환경변수 설정](supabase-environment-setup.md)을 따른다.
+- Vercel CLI: `turboguy36-9404` 계정으로 로그인 확인 완료.
+
 - [ ] 각 항목의 결정값 또는 미확정 상태·담당자·기한·차단 범위를 기록했다.
 - [ ] 공개 법령 PoC 범위와 문서 영구 ID 수집 목록 초안을 선정했다.
 - [ ] 자료 공개와 외부 모델 전송 승인을 구별하고 미승인 내부 자료를 개발에 사용하지 않는다.
