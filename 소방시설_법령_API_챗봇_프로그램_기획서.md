@@ -6,6 +6,8 @@
 
 0.3 개정 (2026-09-17): 미결이던 두 항목을 확정했다. 도면 패널은 1차 출시에서 제외하고(§2.2·§3.1), 사용자 인증은 Supabase Auth 소셜 로그인을 채택한다(§3). 법령 API 연결 시험 결과는 [법령 API PoC](docs/law-api-poc.md)에 있다.
 
+0.4 개정 (2026-09-17): [OpenRouter PoC](docs/openrouter-poc.md) 결과 OpenRouter 가 임베딩을 제공하지 않음을 확인하고 §6.1·§9 의 전제를 고쳤다. 임베딩은 OpenAI `text-embedding-3-small`(1536차원)로 확정한다. 기본 챗 모델은 `anthropic/claude-haiku-4.5` 로 둔다(§6.4). 내부 자료의 외부 모델 전송을 허용하기로 결정해 §9 에 기록했다.
+
 대상 독자: Vercel·Supabase 및 백엔드 개발 경험이 있는 개발자와 소방 업무 검토 담당자
 
 ## 1. 프로젝트 목표와 전제
@@ -199,7 +201,7 @@ Vercel 함수 및 Cron에는 실행시간 제한이 있고, 실패한 Cron 호�
 | `legal_documents` | `id`, `source_type`, `source_document_id`, `title`, `issuer`, `document_kind` |
 | `legal_versions` | `id`, `document_id`, `source_version_id`, `effective_date`, `promulgated_at`, `source_url`, `raw_path`, `content_hash`, `review_status`, `fetched_at` |
 | `legal_units` | `id`, `version_id`, `unit_type`, `locator`, `parent_unit_id`, `heading`, `text`, `attachment_path`, `parse_status` |
-| `search_chunks` | `id`, `unit_id`, `context_text`, `chunk_hash`, `embedding_model`, `embedding_revision`, `embedding`, `visibility` |
+| `search_chunks` | `id`, `unit_id`, `context_text`, `chunk_hash`, `embedding_model`, `embedding_revision`, `embedding vector(1536)`, `visibility` |
 | `legal_relations` | `from_unit_id`, `to_document_id/to_unit_id`, `relation_type`, `review_status` |
 | `source_files` | 내부 파일 출처, 분류, 공개 가능 범위, 게시 승인자. 공개 법령과 구분 |
 | `rule_sets` | 규칙 버전, 적용 범위, 승인 상태, 승인자, 발행 시각 |
@@ -212,6 +214,8 @@ Vercel 함수 및 Cron에는 실행시간 제한이 있고, 실패한 Cron 호�
 | `review_events`, `feedback` | 승인·반려 이력, 사용자 오류 신고, 처리 상태 |
 
 권장 제약: `(source_type, source_document_id)` 고유, `(document_id, source_version_id, effective_date)` 등 원천 버전 특성에 맞춘 고유 제약, 버전별 locator 고유. 규칙 근거·답변 인용은 외래키로 무결성을 보장한다. 버전 식별자가 없는 내부 파일은 content hash 기반 revision을 사용한다.
+
+`search_chunks.embedding` 은 `vector(1536)` 이다. pgvector 는 차원을 컬럼 타입에 고정하므로 임베딩 모델 변경은 컬럼·인덱스 재생성과 전체 재임베딩을 뜻한다(§6.1).
 
 원문·공개용 데이터와 운영·대화 데이터를 schema 또는 권한으로 분리한다. 초기 일반 사용자 요청은 서버에서 처리하고 DB에 직접 쓰지 않는다. Supabase secret 키는 RLS를 우회하므로 서버 경로 자체에서 소유권과 관리자 권한을 검사한다. 브라우저에 노출되는 테이블은 grants와 RLS를 함께 설정한다. 내부 자료는 검색 RPC에서도 공개 가능 범위를 강제한다. [S7]
 
@@ -228,7 +232,13 @@ Vercel 함수 및 Cron에는 실행시간 제한이 있고, 실패한 Cron 호�
 
 Supabase는 전문 검색과 벡터 검색을 결합하는 예제를 제공한다. 다만 한국어 법률 검색에 영어용 전문 검색 설정을 그대로 적용하지 않는다. 초기에는 정확 일치·pg_trgm·다국어 임베딩을 비교 평가하고, 형태소 분석 도입은 검색 평가 결과로 결정한다. 후보 수 30, 최종 근거 6~10개는 튜닝 시작값이다. [S6]
 
-임베딩은 OpenRouter `/api/v1/embeddings` 지원 모델 중 한국어 평가를 통과한 모델을 고른다. 챗 모델과 별도 ID·차원을 저장하고, 질의와 문서에 같은 임베딩 체계를 사용한다. 모델 변경 시 새 인덱스를 만든 뒤 전환한다. 실제 사용 가능 모델·차원·요금은 착수 시 확인한다. [S12]
+임베딩은 **OpenAI `text-embedding-3-small`** 을 사용한다. 1536차원, 입력 상한 8,192토큰, 100만 토큰당 $0.02 다(2026-09-17 확인). 챗 모델과 달리 OpenRouter 를 경유하지 않고 OpenAI API 를 직접 호출한다. **OpenRouter 는 임베딩 모델을 제공하지 않는다** — 444개 모델 전부 chat completions 전용임을 확인했다. [S12]
+
+이 프로젝트 규모에서 임베딩 비용은 결정 요인이 아니다. 수집 대상 전체를 500만 토큰으로 넉넉히 잡아도 $0.10 수준이다. 선택 기준은 한국어 법령 검색 품질이며, ISS-012 의 담당자 검토 평가셋으로 후보를 비교해 확정한다. 지금 값은 착수용 기본값이다.
+
+질의와 문서에 반드시 같은 모델·차원을 사용한다. 모델이 다르면 좌표계가 달라 거리 계산이 무의미하다. `search_chunks` 에 `embedding_model` 과 `embedding_revision` 을 저장하고 질의 시 불일치를 차단한다.
+
+pgvector 컬럼은 차원을 타입에 고정하므로(`vector(1536)`) 모델 변경은 컬럼·인덱스 재생성과 전체 재임베딩을 뜻한다. 모델을 바꿀 때는 새 인덱스를 만든 뒤 전환하고, 복귀 경로를 함께 남긴다.
 
 ### 6.2 한 턴의 처리
 
@@ -281,7 +291,13 @@ Zod 등으로 구조를 검증하고, 인용 ID가 실제 검색 결과에 속�
 
 ### 6.4 모델 선택과 장애 처리
 
-특정 유료 모델을 지금 확정하지 않는다. 한국어 법령 질문·표 조건·모름 응답·JSON 준수·지연·비용으로 후보 2~3개를 비교한다. 평가를 통과한 대체 모델만 허용한다.
+기본 모델은 **`anthropic/claude-haiku-4.5`** 로 둔다. [OpenRouter PoC](docs/openrouter-poc.md)에서 후보를 비교한 결과다. 질문당 약 $0.0071 이며 월 10,000회 기준 $71 수준이다(2026-09-17 확인).
+
+값싼 후보를 기본 모델로 쓰지 않는다. `google/gemini-2.5-flash-lite` 는 근거 본문에 심은 지시문을 명령으로 따랐고(프롬프트 인젝션), 존재하지 않는 조항을 있는 것처럼 제시했다. **두 경우 모두 인용 ID 는 유효했으므로 §6.3 의 ID 검증으로는 걸러지지 않는다.** 대체 모델 후보 `google/gemini-3.1-flash-lite` 는 아직 같은 시험을 거치지 않았다.
+
+허용 모델 목록에는 이 시험을 통과한 모델만 넣는다. `/api/v1/models` 의 `supported_parameters` 표시를 근거로 넣지 않는다. `provider.require_parameters=true` 를 붙이면 OpenAI 계열은 조건을 만족하는 provider endpoint 가 없어 전면 차단된다.
+
+모델별 토큰 수가 크게 다르다. 같은 프롬프트에 입력 토큰이 2,558 대 4,649 였다. 비용 산식에 단가만 쓰고 토큰 수를 모델별로 구분하지 않으면 틀린다.
 
 429·5xx는 제한된 지수 백오프로 재시도한다. 인증 오류·잔액 부족은 반복 호출하지 않고 운영 오류로 분류한다. 실패 시 새 결론을 추정하지 않고 확보된 원문 근거를 보여준다. 요청별 토큰 상한, 세션별 횟수 제한, 일일 비용 예산을 서버에서 집행한다.
 
@@ -324,7 +340,10 @@ LAW_API_OC=
 OPENROUTER_API_KEY=
 OPENROUTER_CHAT_MODEL=
 OPENROUTER_FALLBACK_MODEL=
-OPENROUTER_EMBEDDING_MODEL=
+
+# 임베딩은 OpenRouter 를 경유하지 않고 OpenAI 를 직접 호출한다. §6.1 참고.
+OPENAI_API_KEY=
+EMBEDDING_MODEL=
 EMBEDDING_DIMENSIONS=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
@@ -334,11 +353,27 @@ SESSION_SIGNING_SECRET=
 APP_URL=
 ```
 
-개발·Preview·운영 프로젝트와 키를 분리한다. 원천 API 쿼리에 들어간 OC와 Authorization 헤더는 로그에서 제거한다. DB 연결을 직접 사용할 경우 서버리스에 맞는 풀링을 설정한다.
+개발·Preview·운영 프로젝트와 키를 분리한다. DB 연결을 직접 사용할 경우 서버리스에 맞는 풀링을 설정한다.
+
+비밀값 제거는 나가는 로그만으로 부족하다. 법령 API 는 **목록 응답의 `*상세링크` 필드에 `OC` 를 그대로 담아 돌려준다.** 5개 target 전부 해당한다([법령 API PoC](docs/law-api-poc.md)). 이 값을 그대로 저장하면 DB 에 키가 남고, 근거 카드로 내려가거나 모델 프롬프트에 들어가면 외부로 나간다. 따라서 세 곳에서 모두 제거한다.
+
+1. 나가는 요청 로그의 `OC` 와 `Authorization` 헤더
+2. **수집 시점** — 응답에서 받은 링크 필드를 저장 전에 치환한다
+3. 사용자·모델에 전달하는 URL 은 §6.3 대로 서버가 DB 값으로 다시 조립한다
 
 작업 큐는 원자적인 claim과 lease 만료, 재시도 횟수, 재시도 예정일을 사용한다. 실행시간 예산 전에 종료하고 cursor를 저장한다. 새 작업이 기존 작업과 중복 실행돼도 동일 버전이 중복 게시되지 않도록 한다.
 
-대화·원문 저장기간, 소방본부 내부 자료의 외부 모델 전송 가능 여부, 공공기관의 배포 환경 요구사항은 운영 전 확정한다. 검토 전에는 공개 법령과 비식별 테스트 사례로 개발한다. 내부 자료의 공개 승인과 외부 모델 전송 승인은 별도로 관리한다.
+대화·원문 저장기간과 공공기관의 배포 환경 요구사항은 운영 전 확정한다. 내부 자료의 **공개 승인**과 **외부 모델 전송 승인**은 계속 별도로 관리한다. 전자는 검색 결과·근거 카드에 노출할 수 있는지, 후자는 외부 API 로 본문을 보낼 수 있는지이며 서로 다른 판단이다.
+
+### 외부 모델 전송 결정 (2026-09-17)
+
+소방본부 내부 자료를 외부 모델·임베딩 API 로 전송하는 것을 **허용한다.** 전송 대상은 OpenRouter(챗)와 OpenAI(임베딩)다.
+
+- 이 결정으로 §6.1 의 임베딩 공급자 선택에서 외부 전송 제약이 빠진다. Supabase Edge Function 내장 모델처럼 데이터가 나가지 않는 선택지를 강제할 이유가 없다.
+- 다만 **공개 승인과는 여전히 분리한다.** 외부 모델에 보낼 수 있다는 것이 사용자에게 노출해도 된다는 뜻은 아니다. `source_files` 의 공개 범위와 `search_chunks.visibility` 는 그대로 강제한다.
+- 승인자와 승인 범위는 ISS-024 에 기록한다. 개별 자료의 전송 가부는 자료별 승인 상태로 계속 관리하며, 이 결정은 "외부 전송이라는 방식 자체를 허용한다"는 뜻이다.
+
+검토 전에는 공개 법령과 비식별 테스트 사례로 개발한다.
 
 ## 10. 검증과 검수 기준
 
@@ -451,7 +486,7 @@ docs/                    # 운영·수집·검수 문서
 - [S9 소방시설 설치 및 관리에 관한 법률 시행령](https://www.law.go.kr/lsInfoP.do?lsId=009694)
 - [S10 화재안전기술기준 NFTC 103 등록 사례](https://www.law.go.kr/LSW/admRulInfoP.do?admRulSeq=2100000281674&chrClsCd=010201)
 - [S11 OpenRouter API Reference](https://openrouter.ai/docs/api_reference/overview)
-- [S12 OpenRouter Embeddings](https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings)
+- [S12 OpenAI Embeddings](https://developers.openai.com/api/docs/guides/embeddings) · OpenRouter 는 임베딩을 제공하지 않는다(§6.1)
 - [S13 OpenRouter Structured Outputs](https://openrouter.ai/docs/guides/features/structured-outputs)
 - [법령 별표·서식 목록](https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsBylListGuide)
 - [행정규칙 별표·서식 목록](https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulBylListGuide)
