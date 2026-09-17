@@ -1,4 +1,5 @@
-import { esc, inlineMarkup, must } from '../lib/dom';
+import { esc, must } from '../lib/dom';
+import { inline, renderRich } from '../lib/markdown';
 import { icons } from '../lib/icons';
 import { FEEDBACK_LABEL, type FeedbackCategory } from '../api/feedback';
 import type { AppActions } from '../actions';
@@ -12,7 +13,7 @@ function renderUser(msg: UserMessage): string {
 const CASE_FIELD = /^[a-z][a-z0-9_]*$/;
 
 const STATUS_NOTE: Partial<Record<AnswerEnvelope['status'], { tone: string; text: string }>> = {
-  insufficient_evidence: { tone: 'flag', text: '관련 근거를 찾지 못했습니다' },
+  insufficient_evidence: { tone: 'flag', text: '조금 더 알려 주시면 근거를 찾을 수 있어요' },
   date_unclear: { tone: 'flag', text: '적용 시점 확인 필요' },
   fallback: { tone: 'flag', text: '자동 답변 실패 · 근거만 표시' },
 };
@@ -53,7 +54,7 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
   const statements = a.statements.length
     ? `<ul class="statements">${a.statements
         .map(
-          (s) => `<li>${inlineMarkup(s.text)} ${s.sourceIds
+          (s) => `<li>${inline(s.text)} ${s.sourceIds
             .map((ref) => {
               const src = e.sources.find((x) => x.ref === ref);
               return src
@@ -88,7 +89,9 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
       : '';
 
   const followUps = a.followUpQuestions.length
-    ? `<div class="followups"><p class="followups__label">더 정확히 안내하려면</p>${a.followUpQuestions
+    ? `<div class="followups"><p class="followups__label">${
+        e.status === 'insufficient_evidence' ? '아래를 알려 주세요' : '더 정확히 안내하려면'
+      }</p>${a.followUpQuestions
         .map((q) =>
           // 영업장 조건 항목이면 질문으로 보내지 않고 조건 입력 칸을 연다
           hasCase && CASE_FIELD.test(q.field)
@@ -99,7 +102,7 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
     : '';
 
   const limitations = a.limitations.length
-    ? `<ul class="limits">${a.limitations.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
+    ? `<ul class="limits">${a.limitations.map((l) => `<li>${inline(l)}</li>`).join('')}</ul>`
     : '';
 
   const sources = e.sources.length
@@ -123,7 +126,7 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
     <span class="msg__avatar" aria-hidden="true">${icons.flame(16)}</span>
     <div class="msg__body">
       ${note ? `<p class="status-note tone-${note.tone}">${esc(note.text)}</p>` : ''}
-      <p>${inlineMarkup(a.summary)}</p>
+      <div class="doc">${renderRich(a.summary)}</div>
       ${assessment}
       ${statements}
       ${followUps}

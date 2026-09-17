@@ -179,17 +179,44 @@ function toSources(evidence: readonly Evidence[], refs: ReadonlyMap<string, stri
   }));
 }
 
-function templateAnswer(kind: 'insufficient' | 'fallback', search: SearchResult): ChatAnswer {
+/** 질문에 이미 들어 있는 정보 (근거를 못 찾았을 때 무엇을 더 물을지 정한다) */
+const MENTIONS: ReadonlyArray<[string, RegExp]> = [
+  ['facility', /소화기|소화전|스프링클러|자동화재|탐지|경보|유도등|유도표지|피난|완강기|비상조명|시각경보|속보|누전|가스누설|제연|방염|소화설비|소화용수|연결송수관|무선통신/u],
+  ['building_use', /학원|음식점|카페|주점|노래|피시방|PC방|사무실|업무시설|근린생활|교육연구|숙박|의료|판매|창고|공장|주택|아파트|고시원|목욕장|산후조리|다중이용업/u],
+  ['size', /\d+\s*(㎡|m2|제곱|평|층|명)/u],
+  ['event_date', /\d{4}\s*[.\-년]/u],
+];
+
+const CLARIFYING: Record<string, { field: string; question: string }> = {
+  facility: { field: 'facility', question: '어떤 소방시설이 궁금하신가요? (소화기, 자동화재탐지설비, 스프링클러, 유도등, 피난기구 등)' },
+  building_use: { field: 'building_use', question: '어떤 업종이고 건물은 어떤 용도인가요? (예: 상가 건물에 있는 학원)' },
+  size: { field: 'size', question: '영업장이 몇 층이고 바닥면적은 몇 ㎡인가요? 건물 전체 연면적도 알면 알려 주세요.' },
+  event_date: { field: 'event_date', question: '신축·용도변경처럼 공사 계획이 있다면 건축허가(신고) 날짜를 알려 주세요.' },
+};
+
+/** 무엇이 빠졌는지 보고 되물을 질문을 고른다 (ISS-034) */
+export function clarifyingQuestions(question: string): { field: string; question: string }[] {
+  const missing = MENTIONS.filter(([, re]) => !re.test(question)).map(([key]) => key);
+  // 시설과 업종이 가장 중요하다. 시점은 공사 이야기가 나왔을 때만 묻는다
+  const order = ['facility', 'building_use', 'size'].filter((k) => missing.includes(k));
+  if (/신축|증축|개축|용도\s*변경|허가|착공|완공|리모델링/u.test(question) && missing.includes('event_date')) order.push('event_date');
+  if (order.length) return order.slice(0, 3).map((k) => CLARIFYING[k]!);
+  // 질문에 조건은 다 있는데 근거를 못 찾은 경우. 같은 것을 다시 묻지 않는다
+  return [
+    { field: 'scope', question: '설치 대상인지 여부가 궁금하신가요, 설치 방법·기준이 궁금하신가요?' },
+    { field: 'building_total', question: '건물 전체의 연면적과 층수를 알려 주세요. 소방시설 기준은 대부분 건물 단위로 정해집니다.' },
+  ];
+}
+
+function templateAnswer(kind: 'insufficient' | 'fallback', search: SearchResult, question = ''): ChatAnswer {
   if (kind === 'insufficient') {
+    const questions = clarifyingQuestions(question);
     return {
       mode: 'legal_search',
-      summary: '질문과 관련된 소방 법령 근거를 찾지 못했습니다. 건물 용도, 층, 면적처럼 구체적인 조건이나 궁금한 소방시설을 알려 주시면 다시 찾아보겠습니다.',
+      summary: `아직 답변에 필요한 정보가 부족합니다. 아래 ${questions.length}가지를 알려 주시면 해당하는 법령 조문을 찾아 근거와 함께 안내해 드리겠습니다.`,
       statements: [],
-      followUpQuestions: [
-        { field: 'facility', question: '어떤 소방시설(소화기, 스프링클러, 자동화재탐지설비 등)이 궁금하신가요?' },
-        { field: 'building_use', question: '영업장의 업종과 건물 용도를 알려 주세요.' },
-      ],
-      limitations: ['관련 근거가 확인되지 않아 답변을 생성하지 않았습니다.'],
+      followUpQuestions: questions,
+      limitations: ['질문만으로는 어떤 기준을 찾아야 할지 정하지 못했습니다. 위 내용을 알려 주시면 다시 찾습니다.'],
     };
   }
   return {
@@ -255,7 +282,7 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
   const record = (status: RunRecord['status']): RunRecord => ({ status, promptVersion: PROMPT_VERSION, ...run });
 
   if (search.status === 'insufficient_evidence' && assessment.length === 0) {
-    return { envelope: envelope('insufficient_evidence', templateAnswer('insufficient', search)), run: record('succeeded') };
+    return { envelope: envelope('insufficient_evidence', templateAnswer('insufficient', search, opts.question)), run: record('succeeded') };
   }
 
   const models = [opts.model, ...(opts.fallbackModel && opts.fallbackModel !== opts.model ? [opts.fallbackModel] : [])];

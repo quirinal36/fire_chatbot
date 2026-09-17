@@ -2,13 +2,11 @@
   "name": "fire-chatbot-e2e",
   "private": true,
   "type": "module",
-  "description": "브라우저 핵심 흐름 시험 (설치된 Chrome 사용)",
+  "description": "브라우저 핵심 흐름 시험 (Aside 브라우저)",
   "scripts": {
-    "chat": "node chat.mjs",
-    "case": "node case.mjs",
-    "admin": "node admin.mjs"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.63.0"
+    "chat": "./run-aside.sh chat",
+    "case": "./run-aside.sh case",
+    "admin": "./run-aside.sh admin",
+    "regression": "./run-aside.sh regression"
   }
 }

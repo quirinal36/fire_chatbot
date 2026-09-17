@@ -1,5 +1,6 @@
 import { FEATURES } from '../config';
 import { esc, must, onAction } from '../lib/dom';
+import { renderRich } from '../lib/markdown';
 import { icons } from '../lib/icons';
 import { planSvg } from '../data/plan';
 import type { AppActions } from '../actions';
@@ -65,7 +66,7 @@ function renderSourceView(view: SourceView): string {
   const path = d.ancestors.map((a) => esc(a.heading ? `${a.locator} ${a.heading}` : a.locator)).join(' › ');
   const children = d.children.length
     ? `<ul class="source__children">${d.children
-        .map((c) => `<li><button type="button" class="link" data-action="open-source" data-source="${esc(c.id)}">${esc(c.locator)}</button> ${esc(c.text)}</li>`)
+        .map((c) => `<li><button type="button" class="link" data-action="open-source" data-source="${esc(c.id)}">${esc(c.locator)}</button> <span class="doc doc--inline">${renderRich(c.text)}</span></li>`)
         .join('')}</ul>`
     : '';
   const links = [
@@ -81,7 +82,7 @@ function renderSourceView(view: SourceView): string {
       <p class="law-entry__meta">${badges({ versionStatus: d.versionStatus, effectiveDate: d.effectiveDate, needsReview: d.parseStatus === 'needs_review' })}</p>
       ${d.currentUnitId ? `<p class="panel__note tone-flag">이 원문은 현행이 아닙니다. <button type="button" class="link" data-action="open-source" data-source="${esc(d.currentUnitId)}">현행 조문 보기</button></p>` : ''}
       ${d.parseStatus === 'needs_review' ? `<p class="panel__note tone-flag">표·그림이 있어 자동 추출이 불완전할 수 있습니다. 원본을 함께 확인하세요.${d.parseNotes ? ` (${esc(d.parseNotes)})` : ''}</p>` : ''}
-      <pre class="source__text">${esc(d.text)}</pre>
+      <div class="source__text doc">${renderRich(d.text)}</div>
       ${children}
       <div class="source__links">${links}</div>
       <p class="panel__note">법령 버전 ${esc(d.sourceVersionId)}${d.promulgatedAt ? ` · 공포 ${esc(d.promulgatedAt)}` : ''}</p>

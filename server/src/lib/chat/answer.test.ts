@@ -189,3 +189,28 @@ describe('법령 일반 설명과 건물 판정 구분', () => {
     expect(validateAnswer(answer('학원 계단에는 유도표지를 설치하지 않아도 됩니다.'), ctx).ok).toBe(false);
   });
 });
+
+describe('근거 부족 시 되묻기 (ISS-034)', () => {
+  it('질문에 없는 정보만 묻는다', async () => {
+    const { clarifyingQuestions } = await import('./answer');
+    expect(clarifyingQuestions('소방 기준 알려줘').map((q) => q.field)).toEqual(['facility', 'building_use', 'size']);
+    // 조건이 다 있는데도 못 찾았으면 같은 것을 다시 묻지 않는다
+    expect(clarifyingQuestions('3층 학원인데 소화기 기준 알려줘').map((q) => q.field)).toEqual(['scope', 'building_total']);
+    expect(clarifyingQuestions('학원 소화기').map((q) => q.field)).toEqual(['size']);
+    expect(clarifyingQuestions('학원 소화기 112㎡ 3층 신축').map((q) => q.field)).toContain('event_date');
+  });
+
+  it('근거가 없으면 모델 없이 되묻는 답변을 만든다', async () => {
+    const call = vi.fn();
+    const out = await generateAnswer({
+      ...base,
+      question: '소방 기준 알려줘',
+      search: search({ status: 'insufficient_evidence', evidence: [] }),
+      call,
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(out.envelope.answer.followUpQuestions.length).toBeGreaterThanOrEqual(2);
+    expect(out.envelope.answer.summary).not.toContain('찾지 못했습니다');
+    expect(out.envelope.answer.summary).toContain('알려 주시면');
+  });
+});

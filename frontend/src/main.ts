@@ -13,6 +13,7 @@ import { listSessions, loadMessages } from './api/sessions';
 import { fetchSource } from './api/sources';
 import { must } from './lib/dom';
 import { newId, newRequestId } from './lib/id';
+import { mergeConversations } from './lib/sessions';
 import { createStore } from './lib/store';
 import { mountChatHeader } from './components/chatHeader';
 import { mountComposer } from './components/composer';
@@ -78,7 +79,13 @@ function updateConversation(id: string, fn: (c: Conversation) => Conversation): 
 }
 
 function append(id: string, message: Message): void {
-  updateConversation(id, (c) => ({ ...c, messages: [...c.messages, message] }));
+  store.setState((s) => {
+    // 목록 새로고침과 겹쳐 대화가 빠졌더라도 메시지를 잃지 않는다 (ISS-035)
+    if (!s.conversations.some((c) => c.id === id)) {
+      return { conversations: [{ id, caseId: null, title: '새 대화', meta: '방금', messages: [message], loaded: true }, ...s.conversations] };
+    }
+    return { conversations: s.conversations.map((c) => (c.id === id ? { ...c, messages: [...c.messages, message] } : c)) };
+  });
 }
 
 function updateMessage(conversationId: string, messageId: string, fn: (m: Message) => Message): void {
@@ -175,13 +182,7 @@ async function loadConversation(id: string): Promise<void> {
 async function refreshSessions(): Promise<void> {
   try {
     const sessions = await listSessions();
-    store.setState((s) => {
-      const active = s.conversations.find((c) => c.id === s.activeConversationId);
-      // 아직 서버에 없는 새 대화(질문 전)는 목록 맨 앞에 둔다
-      const keep = active && !sessions.some((x) => x.id === active.id) && active.messages.length === 0 ? [active] : [];
-      const merged = sessions.map((x) => s.conversations.find((c) => c.id === x.id && c.loaded) ?? x);
-      return { conversations: [...keep, ...merged] };
-    });
+    store.setState((s) => ({ conversations: mergeConversations(s.conversations, sessions, s.activeConversationId) }));
   } catch (err) {
     store.setState({ notice: errorText(err) });
   }
