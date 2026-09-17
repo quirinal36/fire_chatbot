@@ -12,8 +12,15 @@ import type { RawAppendix, RawArticle, RawDocument } from '../law-api/types';
  * 정규화 규칙을 바꾸면 올린다. 저장된 버전의 값과 다르면 수집 CLI 가 같은 원문을 다시 정규화한다.
  * 2: 별표의 "27의2." 가지번호, "비고" 절 분리
  * 3: 비고 아래 번호를 비고의 하위로(별표7/비고.1)
+ * 4: 가지 조문 locator 를 제13조의2 로 (이전: 제13의2조)
  */
-export const PARSER_VERSION = '3';
+export const PARSER_VERSION = '4';
+
+/** "13의2" → "제13조의2" */
+export function articleLocator(number: string): string {
+  const [base, branch] = number.split('의');
+  return branch ? `제${base}조의${branch}` : `제${base}조`;
+}
 
 export type UnitType =
   | 'chapter'
@@ -196,7 +203,7 @@ function normalizeArticle(a: RawArticle, ordinal: number, units: NormalizedUnit[
     headingKey.current = key;
     return;
   }
-  const articleLoc = unique(`제${a.number}조`, seen);
+  const articleLoc = unique(articleLocator(a.number), seen);
   const articleKey = `a:${a.key}:${ordinal}`;
   // 번호 없는 단일 항의 호는 조에 바로 붙인다
   const bodyText = [a.text, ...a.paragraphs.filter((p) => p.number === '').map((p) => p.text)].filter(Boolean).join('\n');

@@ -5,6 +5,7 @@
  * 게시 상태·기준일·공개 범위 필터는 DB 함수가 강제한다.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { rpcRead } from '../supabase';
 import { embed, embeddingSpec, toPgVector, type EmbeddingSpec } from './embeddings';
 import { analyzeQuery, type QueryAnalysis } from './query';
 
@@ -31,6 +32,8 @@ export interface Evidence {
   readonly unitId: string;
   readonly versionId: string;
   readonly documentId: string;
+  /** 법령ID·행정규칙ID·해석일련번호 */
+  readonly sourceDocumentId: string;
   readonly documentTitle: string;
   readonly sourceType: string;
   readonly code: string | null;
@@ -43,7 +46,9 @@ export interface Evidence {
   readonly sourceUrl: string | null;
   readonly transferAllowed: boolean;
   readonly score: number;
-  readonly signals: { exact?: number; keyword?: number; vector?: number };
+  readonly signals: { exact?: number; keyword?: number; vector?: number; scopedKeyword?: number; scopedVector?: number };
+  /** 질문 키워드 중 이 근거에 들어 있는 수 */
+  readonly matchedTerms: number;
   readonly context: EvidenceContext[];
 }
 
@@ -60,6 +65,8 @@ export interface SearchResult {
 }
 
 const RRF_K = 60;
+/** 설치 대상(어떤 건물에 설치해야 하는가)은 시행령 별표에서 정한다 */
+const APPLICABILITY_TITLES = ['소방시설 설치 및 관리에 관한 법률 시행령', '다중이용업소의 안전관리에 관한 특별법 시행령'];
 /** 벡터 유사도가 이 값보다 낮고 다른 신호가 없으면 근거로 보지 않는다 */
 const MIN_VECTOR_SCORE = 0.35;
 
@@ -67,6 +74,9 @@ export const todayInSeoul = () =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
 
 type Ranked = { unitId: string; score: number };
+
+/** 질문이 조항을 직접 지정했다면 그 조항이 가장 앞에 와야 한다 */
+const LIST_WEIGHT: Record<string, number> = { exact: 5 };
 
 function rrf(lists: Record<string, Ranked[]>) {
   const fused = new Map<string, { score: number; signals: Evidence['signals'] }>();
@@ -78,7 +88,7 @@ function rrf(lists: Record<string, Ranked[]>) {
       seen.add(item.unitId);
       rank += 1;
       const entry = fused.get(item.unitId) ?? { score: 0, signals: {} };
-      entry.score += 1 / (RRF_K + rank);
+      entry.score += (LIST_WEIGHT[name] ?? 1) / (RRF_K + rank);
       (entry.signals as Record<string, number>)[name] = item.score;
       fused.set(item.unitId, entry);
     }
@@ -86,64 +96,31 @@ function rrf(lists: Record<string, Ranked[]>) {
   return [...fused.entries()].sort((a, b) => b[1].score - a[1].score);
 }
 
-interface UnitRecord {
-  id: string;
-  parent_unit_id: string | null;
-  unit_type: string;
+interface BundleRow {
+  unit_id: string;
+  version_id: string;
+  document_id: string;
+  source_document_id: string;
+  title: string;
+  code: string | null;
+  source_type: string;
   locator: string;
   heading: string | null;
   text: string;
   parse_status: 'ok' | 'needs_review';
-  version_id: string;
+  effective_date: string | null;
+  version_status: string;
+  source_url: string | null;
+  transfer_allowed: boolean;
+  context: EvidenceContext[];
 }
 
-const UNIT_COLUMNS = 'id, parent_unit_id, unit_type, locator, heading, text, parse_status, version_id';
-
-async function loadContext(db: SupabaseClient, unit: UnitRecord): Promise<EvidenceContext[]> {
-  const context: EvidenceContext[] = [];
-  // 상위 단위 (최대 4단계)
-  let parentId = unit.parent_unit_id;
-  for (let depth = 0; parentId && depth < 4; depth++) {
-    const { data } = await db.from('legal_units').select(UNIT_COLUMNS).eq('id', parentId).maybeSingle<UnitRecord>();
-    if (!data) break;
-    context.unshift({
-      unitId: data.id,
-      locator: data.locator,
-      heading: data.heading,
-      // 별표 전체 본문은 너무 길다. 제목만 둔다
-      text: data.unit_type === 'appendix' ? '' : data.text.slice(0, 600),
-      relation: 'ancestor',
-    });
-    parentId = data.parent_unit_id;
-  }
-  // 같은 부모 아래의 비고·단서
-  if (unit.parent_unit_id) {
-    const { data } = await db
-      .from('legal_units')
-      .select(UNIT_COLUMNS)
-      .eq('parent_unit_id', unit.parent_unit_id)
-      .neq('id', unit.id)
-      .or('text.like.비고*,text.like.※*,text.like.*다만*')
-      .limit(3)
-      .returns<UnitRecord[]>();
-    for (const n of data ?? []) {
-      context.push({ unitId: n.id, locator: n.locator, heading: n.heading, text: n.text.slice(0, 800), relation: 'note' });
-    }
-  }
-  // 제목뿐인 단위면 하위 내용을 붙인다
-  if (unit.text.trim().length < 40) {
-    const { data } = await db
-      .from('legal_units')
-      .select(UNIT_COLUMNS)
-      .eq('parent_unit_id', unit.id)
-      .order('ordinal')
-      .limit(5)
-      .returns<UnitRecord[]>();
-    for (const c of data ?? []) {
-      context.push({ unitId: c.id, locator: c.locator, heading: c.heading, text: c.text.slice(0, 800), relation: 'child' });
-    }
-  }
-  return context;
+/** 근거 단위와 상위·비고·하위 문맥을 한 번에 가져온다 */
+export async function loadEvidence(db: SupabaseClient, ids: readonly string[]): Promise<Map<string, BundleRow>> {
+  if (ids.length === 0) return new Map();
+  const { data, error } = await rpcRead(db, 'evidence_bundle', { p_unit_ids: ids });
+  if (error) throw new Error(`근거 조회 실패: ${error.message}`);
+  return new Map((data as BundleRow[]).map((r) => [r.unit_id, r]));
 }
 
 export async function search(db: SupabaseClient, question: string, opts: SearchOptions = {}): Promise<SearchResult> {
@@ -156,13 +133,36 @@ export async function search(db: SupabaseClient, question: string, opts: SearchO
   const modes = new Set(opts.modes ?? ['exact', 'keyword', 'vector']);
 
   const lists: Record<string, Ranked[]> = {};
+  const coverage = new Map<string, number>();
   let embeddingTokens = 0;
 
+  // 코드·법령명을 말하면 그 문서 안에서, 설치 대상을 물으면 시행령 안에서 한 번 더 찾는다
+  const named = analysis.codes.length > 0 || analysis.titleTerms.length > 0;
+  const scope = named
+    ? { p_scope_codes: analysis.codes, p_scope_titles: analysis.titleTerms }
+    : analysis.asksApplicability
+      ? { p_scope_codes: [], p_scope_titles: APPLICABILITY_TITLES }
+      : null;
+
+  const keyword = async (name: string, extra: object | null) => {
+    const { data, error } = await rpcRead(db, 'search_keyword', {
+      p_terms: analysis.terms,
+      p_as_of: asOf,
+      p_visibility: visibility,
+      p_limit: candidates,
+      ...(extra ?? {}),
+    });
+    if (error) throw new Error(`키워드 검색 실패: ${error.message}`);
+    const rows = data as { unit_id: string; score: number; matched: number }[];
+    for (const r of rows) coverage.set(r.unit_id, Math.max(coverage.get(r.unit_id) ?? 0, r.matched));
+    lists[name] = rows.map((r) => ({ unitId: r.unit_id, score: r.score }));
+  };
+
   const tasks: Promise<void>[] = [];
-  if (modes.has('exact') && (analysis.codes.length || analysis.titleTerms.length)) {
+  if (modes.has('exact') && named && analysis.locators.length) {
     tasks.push(
       (async () => {
-        const { data, error } = await db.rpc('search_exact', {
+        const { data, error } = await rpcRead(db, 'search_exact', {
           p_codes: analysis.codes,
           p_title_terms: analysis.titleTerms,
           p_locators: analysis.locators,
@@ -176,18 +176,8 @@ export async function search(db: SupabaseClient, question: string, opts: SearchO
     );
   }
   if (modes.has('keyword') && analysis.terms.length) {
-    tasks.push(
-      (async () => {
-        const { data, error } = await db.rpc('search_keyword', {
-          p_terms: analysis.terms,
-          p_as_of: asOf,
-          p_visibility: visibility,
-          p_limit: candidates,
-        });
-        if (error) throw new Error(`키워드 검색 실패: ${error.message}`);
-        lists.keyword = (data as { unit_id: string; score: number }[]).map((r) => ({ unitId: r.unit_id, score: r.score }));
-      })(),
-    );
+    tasks.push(keyword('keyword', null));
+    if (scope) tasks.push(keyword('scopedKeyword', scope));
   }
   if (modes.has('vector')) {
     tasks.push(
@@ -195,18 +185,22 @@ export async function search(db: SupabaseClient, question: string, opts: SearchO
         const spec = opts.spec ?? embeddingSpec();
         const { vectors, tokens } = await (opts.embedFn ?? embed)([question], spec);
         embeddingTokens = tokens;
-        const { data, error } = await db.rpc('search_vector', {
-          p_embedding: toPgVector(vectors[0]!),
-          p_model: spec.model,
-          p_revision: spec.revision,
-          p_as_of: asOf,
-          p_visibility: visibility,
-          p_limit: candidates,
-        });
-        if (error) throw new Error(`벡터 검색 실패: ${error.message}`);
-        lists.vector = (data as { unit_id: string; score: number }[])
-          .filter((r) => r.score >= MIN_VECTOR_SCORE)
-          .map((r) => ({ unitId: r.unit_id, score: r.score }));
+        const vector = async (name: string, extra: object | null) => {
+          const { data, error } = await rpcRead(db, 'search_vector', {
+            p_embedding: toPgVector(vectors[0]!),
+            p_model: spec.model,
+            p_revision: spec.revision,
+            p_as_of: asOf,
+            p_visibility: visibility,
+            p_limit: candidates,
+            ...(extra ?? {}),
+          });
+          if (error) throw new Error(`벡터 검색 실패: ${error.message}`);
+          lists[name] = (data as { unit_id: string; score: number }[])
+            .filter((r) => r.score >= MIN_VECTOR_SCORE)
+            .map((r) => ({ unitId: r.unit_id, score: r.score }));
+        };
+        await Promise.all([vector('vector', null), scope ? vector('scopedVector', scope) : Promise.resolve()]);
       })(),
     );
   }
@@ -217,52 +211,34 @@ export async function search(db: SupabaseClient, question: string, opts: SearchO
 
   const evidence: Evidence[] = [];
   const pending = new Map<string, { documentTitle: string; effectiveDate: string }>();
-  if (ids.length) {
-    const { data: units, error } = await db
-      .from('legal_units')
-      .select(
-        `${UNIT_COLUMNS}, legal_versions!inner(id, effective_date, version_status, source_url, document_id, legal_documents!inner(id, title, code, source_type))`,
-      )
-      .in('id', ids);
-    if (error) throw new Error(`근거 조회 실패: ${error.message}`);
-    const chunkTransfer = await db.from('search_chunks').select('unit_id, transfer_allowed').in('unit_id', ids);
-    const blocked = new Set((chunkTransfer.data ?? []).filter((c) => !c.transfer_allowed).map((c) => c.unit_id));
+  const rows = await loadEvidence(db, ids);
+  for (const [id, f] of fused) {
+    const r = rows.get(id);
+    if (!r) continue;
+    evidence.push({
+      unitId: r.unit_id,
+      versionId: r.version_id,
+      documentId: r.document_id,
+      sourceDocumentId: r.source_document_id,
+      documentTitle: r.title,
+      sourceType: r.source_type,
+      code: r.code,
+      locator: r.locator,
+      heading: r.heading,
+      text: r.text,
+      effectiveDate: r.effective_date,
+      versionStatus: r.version_status,
+      parseStatus: r.parse_status,
+      sourceUrl: r.source_url,
+      transferAllowed: r.transfer_allowed,
+      score: f.score,
+      signals: f.signals,
+      matchedTerms: coverage.get(id) ?? 0,
+      context: r.context,
+    });
+  }
 
-    const byId = new Map((units ?? []).map((u) => [u.id as string, u]));
-    for (const [id, f] of fused) {
-      const u = byId.get(id) as unknown as UnitRecord & {
-        legal_versions: {
-          id: string;
-          effective_date: string | null;
-          version_status: string;
-          source_url: string | null;
-          document_id: string;
-          legal_documents: { id: string; title: string; code: string | null; source_type: string };
-        };
-      };
-      if (!u) continue;
-      const v = u.legal_versions;
-      evidence.push({
-        unitId: u.id,
-        versionId: v.id,
-        documentId: v.document_id,
-        documentTitle: v.legal_documents.title,
-        sourceType: v.legal_documents.source_type,
-        code: v.legal_documents.code,
-        locator: u.locator,
-        heading: u.heading,
-        text: u.text,
-        effectiveDate: v.effective_date,
-        versionStatus: v.version_status,
-        parseStatus: u.parse_status,
-        sourceUrl: v.source_url,
-        transferAllowed: !blocked.has(u.id),
-        score: f.score,
-        signals: f.signals,
-        context: await loadContext(db, u),
-      });
-    }
-
+  if (evidence.length) {
     const docIds = [...new Set(evidence.map((e) => e.documentId))];
     const { data: scheduled } = await db
       .from('legal_versions')
@@ -276,7 +252,15 @@ export async function search(db: SupabaseClient, question: string, opts: SearchO
     }
   }
 
-  const hasStrongSignal = evidence.some((e) => e.signals.exact !== undefined || (e.signals.keyword ?? 0) >= 4 || (e.signals.vector ?? 0) >= 0.45);
+  // 키워드 절반 이상(최소 2개)이 한 근거에 모이거나, 의미가 충분히 가까워야 근거로 본다
+  const needTerms = Math.max(2, Math.ceil(analysis.baseTermCount / 2));
+  const hasStrongSignal = evidence.some(
+    (e) =>
+      e.signals.exact !== undefined ||
+      (e.matchedTerms >= needTerms && (e.signals.vector ?? e.signals.scopedVector ?? 0) >= MIN_VECTOR_SCORE) ||
+      e.matchedTerms >= Math.max(3, needTerms) ||
+      Math.max(e.signals.vector ?? 0, e.signals.scopedVector ?? 0) >= 0.5,
+  );
   const status: SearchStatus =
     evidence.length === 0 || !hasStrongSignal ? 'insufficient_evidence' : analysis.eventWithoutDate ? 'date_unclear' : 'ok';
 

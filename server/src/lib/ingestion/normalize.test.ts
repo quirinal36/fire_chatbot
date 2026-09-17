@@ -134,3 +134,11 @@ describe('별표 가지번호와 비고', () => {
     expect(units.some((u) => u.locator === '제2장제1절')).toBe(true);
   });
 });
+
+describe('가지 조문', () => {
+  it('제13조의2 형태로 만든다', async () => {
+    const { articleLocator } = await import('./normalize');
+    expect(articleLocator('13의2')).toBe('제13조의2');
+    expect(articleLocator('7')).toBe('제7조');
+  });
+});

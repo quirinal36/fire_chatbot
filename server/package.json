@@ -16,7 +16,8 @@
     "ingest": "tsx scripts/ingest.ts",
     "index-corpus": "tsx scripts/index-corpus.ts",
     "publish-corpus": "tsx scripts/publish-corpus.ts",
-    "search": "tsx scripts/search.ts"
+    "search": "tsx scripts/search.ts",
+    "eval-search": "tsx scripts/eval-search.ts"
   },
   "dependencies": {
     "@next/env": "^16.3.5",

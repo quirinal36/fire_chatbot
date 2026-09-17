@@ -31,3 +31,23 @@ export async function pingSupabase(): Promise<{ ok: boolean; ms: number; status?
     return { ok: false, ms: Date.now() - t0, error: err instanceof Error ? err.name : 'unknown' };
   }
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 읽기 전용 RPC 를 네트워크 오류에 한해 다시 시도한다.
+ * DB 가 돌려준 오류(권한·문법·시간 초과)는 다시 시도해도 같으므로 그대로 돌려준다.
+ */
+export async function rpcRead<T>(
+  db: SupabaseClient,
+  fn: string,
+  args: Record<string, unknown>,
+  retries = 2,
+): Promise<{ data: T | null; error: { message: string } | null }> {
+  for (let attempt = 0; ; attempt++) {
+    const { data, error } = await db.rpc(fn, args);
+    const network = error && /fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(error.message);
+    if (!network || attempt >= retries) return { data: data as T | null, error };
+    await sleep(300 * 2 ** attempt);
+  }
+}

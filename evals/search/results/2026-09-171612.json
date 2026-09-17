@@ -1,0 +1,1005 @@
+{
+  "runAt": "2026-09-17T16:11:13.721Z",
+  "topK": 10,
+  "corpus": {
+    "versions": 29,
+    "parserVersions": [
+      "4"
+    ],
+    "chunks": 5558
+  },
+  "modes": {
+    "hybrid": {
+      "summary": {
+        "recallAt10": 0.95,
+        "fullHitRate": 0.95,
+        "statusChecks": "5/5",
+        "p50ms": 980,
+        "p95ms": 1221
+      },
+      "rows": [
+        {
+          "id": "q01",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/1.가.1)",
+            "영:별표4/1.가.3)",
+            "영:제13조제2호",
+            "영:제7조제2항제1호",
+            "영:제40조제1항제2호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q02",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/1.가.1)",
+            "영:제15조제1항제3호",
+            "영:제9조제5호",
+            "영:제9조제4호",
+            "영:제9조제1호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q03",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2/8.라",
+            "영:별표2/18.아",
+            "영:별표2/8.가.2)",
+            "영:별표7/2.가",
+            "영:별표2/27"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q04",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2/2.차",
+            "영:별표2/2.마",
+            "영:별표2/2.사",
+            "영:별표2/2.아",
+            "영:별표2/2.바"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q05",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2/11.가",
+            "영:별표2/3.가",
+            "영:별표2/2.차",
+            "영:별표2/8.라",
+            "해석:2658183:회답"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q06",
+          "category": "capacity",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제2조제3호나목",
+            "영:별표7/2.가",
+            "영:별표7/2",
+            "영:별표7/1",
+            "영:별표7/비고"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q07",
+          "category": "capacity",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제2조제1호가목",
+            "다중령:제2조제1의2호",
+            "NFPC 203:제7조제3항",
+            "다중규칙:별표5/2",
+            "영:별표7/2.가"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q08",
+          "category": "exception",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표7/2.나",
+            "영:별표7/2.가",
+            "영:별표7/1.나",
+            "영:별표7/2.다",
+            "다중령:제2조제3호나목"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q09",
+          "category": "exception",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표7/비고.2",
+            "규칙:별표4/10",
+            "규칙:별표7/1.가.3)",
+            "영:별표7/비고",
+            "규칙:별표7/1.가.2)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q10",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제2조제3호나목",
+            "다중령:제2조제3호",
+            "다중규칙:별표1/2.나",
+            "다중규칙:별표5/2",
+            "다중법:제22조제4항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q11",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제2조제3호나목",
+            "다중령:제2조제3호가목",
+            "다중령:제2조제4호가목",
+            "다중규칙:제5조제5항",
+            "영:별표7/2.가"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q12",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제2조제3호나목",
+            "다중령:제2조제3호가목",
+            "다중령:제2조제4호가목",
+            "영:별표2/2.차",
+            "다중령:제2조제3호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q13",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.다.4)",
+            "영:별표4/2.다.3)",
+            "영:별표4/2.다.12)",
+            "영:별표4/2.라.1)",
+            "영:별표4/2.다.7)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q14",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 203:제4조제1항",
+            "NFTC 203:2.4.2.5",
+            "NFTC 203:2.4.2.4",
+            "NFTC 203:2.4.3.7.6",
+            "NFTC 203:2.4.3.10.5"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q15",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.라.3)",
+            "영:별표4/2.다.5)",
+            "영:별표4/2.다.7)",
+            "영:별표4/2.다.3)",
+            "영:별표4/2.다.10)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q16",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.나.1)",
+            "영:별표4/2.나.5)",
+            "영:별표4/2.나.3)",
+            "영:별표1/2.나.1)",
+            "영:별표5"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q17",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제7조제1항제2호",
+            "영:별표4/2.나.2)",
+            "영:별표8/2.다.2)",
+            "영:별표8/2.바",
+            "영:제9조제5호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q18",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.라.3)",
+            "영:별표4/2.라.4)",
+            "영:별표4/2.라",
+            "영:별표4/2.라.1)",
+            "영:별표4/2.라.2)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q19",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.라.1)",
+            "영:별표4/2.사.5)",
+            "영:별표4/2.다.12)",
+            "해석:2658183:관련법령",
+            "해석:2658183:회답"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q20",
+          "category": "interpretation",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "해석:2658183:회답",
+            "해석:2658183:질의요지",
+            "다중령:제19조제4호",
+            "해석:2658183:관련법령",
+            "NFPC 203:제8조제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q21",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 103:제4조제1항",
+            "NFPC 103:제4조제2항",
+            "NFTC 103:2.1.1.1",
+            "NFPC 103:제4조제6항",
+            "영:별표4/1.라.1)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q22",
+          "category": "threshold",
+          "recall": 0,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/1.라.8)",
+            "영:별표4/1.라.10).다)",
+            "영:별표4/1.마.2).가)",
+            "영:별표4/1.라.10).가)",
+            "영:별표4/1.라.10).라)"
+          ],
+          "missing": [
+            [
+              "영:별표4/1.라.7)"
+            ]
+          ]
+        },
+        {
+          "id": "q23",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제9조의2제1항",
+            "영:별표4/1.마.2).가)",
+            "영:제13조제3호",
+            "다중령:부칙<2010-08-11,22331>",
+            "다중령:제9조의2제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q24",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제30조제4호",
+            "다중령:제9조의2제3항",
+            "다중령:제9조의2",
+            "영:별표4/1.마.4)",
+            "다중령:제9조의2제1항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q25",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/1.다.2).가)",
+            "영:별표4/1.다.1).가)",
+            "영:별표8/3.가._.다)",
+            "영:별표4/1.다.3)",
+            "영:별표4/1.다.1).나)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q26",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/1.다.1).가)",
+            "영:별표4/1.다.2).가)",
+            "영:별표5",
+            "NFPC 102:제8조제2항",
+            "NFTC 102:2.4.2.1"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q27",
+          "category": "exception",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/3.가",
+            "NFTC 301:2.1.3.2",
+            "영:별표6",
+            "NFTC 301:2.2.1",
+            "영:별표1/3.가.4)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q28",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/3.가",
+            "영:별표1/3.가.3)",
+            "NFTC 301:2.2.1.5",
+            "NFTC 301:2.3.2",
+            "영:별표1/3.가.1)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q29",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/3.다.1)",
+            "영:별표4/3.다",
+            "영:별표4/3.다.3)",
+            "영:별표4/3.다.2)",
+            "영:별표4/3.다.2).라)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q30",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제9조제5호",
+            "영:별표4/3.라.1)",
+            "영:별표4/5.나.1)",
+            "영:별표4/3.라.2)",
+            "영:제9조제4호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q31",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:별표1의2/1.다.4)",
+            "영:별표4/3.마",
+            "영:별표4/3.마.2)",
+            "영:별표4/3.마.1)",
+            "다중령:별표1/1.다.4)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q32",
+          "category": "name",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4",
+            "영:별표2/28",
+            "영:부칙<2022-11-29,33004>",
+            "영:별표2/14",
+            "영:별표2/12"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q33",
+          "category": "name",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2",
+            "영:별표2/2",
+            "영:별표2/19.사",
+            "영:별표2/21",
+            "영:별표2/19.바"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q34",
+          "category": "name",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제17조",
+            "영:별표7/1",
+            "영:별표7/2",
+            "영:별표7/2.다",
+            "영:별표7/비고"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q35",
+          "category": "exception",
+          "recall": 1,
+          "status": "date_unclear",
+          "statusPass": null,
+          "top": [
+            "영:제15조",
+            "영:제15조제1항",
+            "영:제51조제4호",
+            "영:제15조제1항제2호",
+            "영:제15조제1항제1호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q36",
+          "category": "exception",
+          "recall": 1,
+          "status": "date_unclear",
+          "statusPass": null,
+          "top": [
+            "영:제51조제4호",
+            "영:제15조제2항",
+            "영:제15조제1항제2호",
+            "영:제15조제2항제2호",
+            "법:제13조제1항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q37",
+          "category": "exception",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제51조제3호",
+            "영:제15조제1항제2호",
+            "영:제15조제1항제1호",
+            "법:제13조제1항",
+            "법:제13조제4항제3호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q38",
+          "category": "threshold",
+          "recall": 1,
+          "status": "date_unclear",
+          "statusPass": null,
+          "top": [
+            "영:제7조제1항제1호",
+            "영:제9조제5호",
+            "영:제7조제1항",
+            "영:제9조제4호",
+            "규칙:제3조제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q39",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 101:제4조",
+            "NFPC 101:제4조제1항",
+            "NFTC 101:2.1.1",
+            "NFPC 101:제4조제3항",
+            "NFPC 101:제5조제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q40",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 101:2.1.1.6",
+            "NFTC 101:2.1.2.3.1",
+            "NFTC 101:1.1.1",
+            "NFTC 101:1.5.1",
+            "NFTC 101:1.5"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q41",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 203:제7조제3항",
+            "NFPC 203:제7조제1항",
+            "NFPC 203:제7조제6항",
+            "NFPC 203:제7조제5항",
+            "NFPC 203:제7조"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q42",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 203:2.1.1.3",
+            "NFPC 203:제4조제1항",
+            "NFTC 203:2.1.1",
+            "NFPC 203:제4조제3항",
+            "NFPC 203:제4조제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q43",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 203:제9조제1항",
+            "NFTC 203:2.6.1.1",
+            "NFTC 203:2.2.3.7",
+            "NFTC 203:2.6.1.2",
+            "NFTC 203:2.6.1"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q44",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 303:제4조",
+            "NFPC 303:제2조",
+            "NFPC 303:제1조",
+            "NFPC 303:제11조",
+            "NFPC 303:제3조"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q45",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 303:2.3.1.2.3",
+            "NFTC 303:2.3.1.2.2",
+            "NFPC 303:제6조",
+            "NFTC 303:2.3.1.2.1",
+            "NFTC 303:2.3.1.2"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q46",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 304:제4조제1항",
+            "NFPC 304:제4조",
+            "NFPC 304:제2조",
+            "NFPC 304:제5조제2항",
+            "NFPC 304:제4조제2항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q47",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 301:제5조",
+            "NFPC 301:제5조제1항",
+            "NFPC 301:제5조제2항",
+            "NFPC 301:제7조",
+            "NFTC 301:2.1.2"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q48",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 301:2.1.2.1",
+            "NFPC 301:제5조제2항",
+            "다중령:제2조제1호가목",
+            "NFTC 301:2.2.1.3",
+            "NFTC 301:2.3.3"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q49",
+          "category": "threshold",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFPC 201:제4조제2항",
+            "NFTC 201:2.1.2",
+            "NFTC 203:2.5.1.3",
+            "NFPC 203:제8조제1항",
+            "NFTC 201:2.1.5.2"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q50",
+          "category": "code",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 201:2.2.1.2",
+            "NFPC 201:제5조",
+            "NFTC 201:2.2.1",
+            "NFTC 201:2.2.1.1",
+            "NFPC 201:제2조"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q51",
+          "category": "name",
+          "recall": 0,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:별표1의2/5",
+            "다중령:별표1의2/5.다",
+            "다중령:별표1의2/1",
+            "다중령:별표1의2/1.다.1).나)",
+            "다중령:별표1의2/5.가"
+          ],
+          "missing": [
+            [
+              "다중법:제9조"
+            ]
+          ]
+        },
+        {
+          "id": "q52",
+          "category": "name",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중령:제9조의3제1항",
+            "다중령:제18조의2제1항제3호",
+            "다중법:제13조의2",
+            "다중령:제22조의2제1항제4호",
+            "다중법:제13조의2제1항"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q53",
+          "category": "name",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "다중규칙:제5조제2항",
+            "다중법:제8조제2항",
+            "다중법:제8조제1항",
+            "다중규칙:제5조제5항",
+            "다중규칙:제5조제1항제1호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q54",
+          "category": "name",
+          "recall": 0,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:제33조제2항",
+            "영:제33조",
+            "영:제33조제1항제4호",
+            "영:제33조제1항제3호",
+            "영:제35조제1항제3호"
+          ],
+          "missing": [
+            [
+              "법:제22조"
+            ]
+          ]
+        },
+        {
+          "id": "q55",
+          "category": "interpretation",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "NFTC 101:2.2.1",
+            "해석:2657063:관련법령",
+            "해석:2657063:회답",
+            "해석:2657063:질의요지",
+            "영:별표5"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q56",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2/14.라",
+            "영:별표2/8.라",
+            "영:별표2/2.차",
+            "영:별표2/19.아",
+            "영:별표2/8.가.2)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q57",
+          "category": "classification",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표2/8.라",
+            "영:별표2/2.차",
+            "영:별표2/18.아",
+            "영:별표4/비고.1",
+            "영:제7조제1항제7호가목"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q58",
+          "category": "classification",
+          "recall": 1,
+          "status": "insufficient_evidence",
+          "statusPass": null,
+          "top": [
+            "영:별표2/2.바",
+            "영:제30조제1호",
+            "영:별표2/2.나",
+            "다중법:제10조의2제1항제2호",
+            "영:별표2/2"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q59",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표8/1.라",
+            "영:별표8/2.라",
+            "영:별표3/2.가",
+            "영:별표4/2.차",
+            "영:별표1/2.차"
+          ],
+          "missing": []
+        },
+        {
+          "id": "q60",
+          "category": "facility",
+          "recall": 1,
+          "status": "ok",
+          "statusPass": null,
+          "top": [
+            "영:별표4/2.사.5)",
+            "영:제30조제1호",
+            "영:별표4/5.가.3)",
+            "영:별표4/2.라.1)",
+            "영:별표4/2.다.4)"
+          ],
+          "missing": []
+        },
+        {
+          "id": "s01",
+          "category": "insufficient",
+          "recall": null,
+          "status": "insufficient_evidence",
+          "statusPass": true,
+          "top": [],
+          "missing": []
+        },
+        {
+          "id": "s02",
+          "category": "insufficient",
+          "recall": null,
+          "status": "insufficient_evidence",
+          "statusPass": true,
+          "top": [
+            "NFTC 301:2.2.1.5",
+            "다중규칙:별표5/2",
+            "다중규칙:별표1/2.나",
+            "NFPC 203:제8조제2항",
+            "NFTC 203:2.5.2.1"
+          ],
+          "missing": []
+        },
+        {
+          "id": "s03",
+          "category": "fabrication_bait",
+          "recall": null,
+          "status": "ok",
+          "statusPass": true,
+          "top": [
+            "영:부칙<2022-11-29,33004>",
+            "영:제39조제1항제1호라목",
+            "영:제7조제1항제4호",
+            "영:제8조제1항",
+            "영:제33조제1항제1호"
+          ],
+          "missing": []
+        },
+        {
+          "id": "s04",
+          "category": "date_unclear",
+          "recall": null,
+          "status": "date_unclear",
+          "statusPass": true,
+          "top": [
+            "NFTC 103:2.5.17.2",
+            "NFTC 103:2.1.1.1",
+            "해석:2657063:회답",
+            "NFPC 103:제4조제1항",
+            "영:별표5"
+          ],
+          "missing": []
+        },
+        {
+          "id": "s05",
+          "category": "date_unclear",
+          "recall": null,
+          "status": "date_unclear",
+          "statusPass": true,
+          "top": [
+            "법:제6조제1항",
+            "규칙:제3조제1항",
+            "영:별표2/2.차",
+            "해석:2657063:회답",
+            "영:제30조제4호"
+          ],
+          "missing": []
+        }
+      ]
+    }
+  }
+}
