@@ -2,6 +2,27 @@
 
 대상 프로젝트: `FireChatbot` (`voiiciyuotuyejcoysbh`) · URL: `https://voiiciyuotuyejcoysbh.supabase.co`
 
+## 주의 · `.env`와 `.env.example`을 혼동하지 않는다
+
+| 파일 | 내용 | Git |
+|---|---|---|
+| `.env` | 실제 키 값 | 제외됨 (`.gitignore`) |
+| `.env.example` | **값이 비어 있는 틀** | 커밋됨 |
+
+`.env.example`에는 `=` 뒤에 아무 값도 넣지 않는다. URL만 예외로 미리 채워져 있다.
+
+`cp .env .env.example` 처럼 실제 값이 `.env.example`로 넘어가는 작업을 하지 않는다. 2026-09-17에 이 사고가 실제로 발생했고, GitHub secret scanning push protection이 푸시를 거부해 유출은 막혔다 (ISS-002 · [#2](https://github.com/quirinal36/fire_chatbot/issues/2)).
+
+같은 일이 생기면 push 거부 메시지의 unblock URL로 secret을 허용하지 말고, `.env.example`에서 값을 지운 뒤 해당 커밋을 고쳐 다시 푸시한다. unblock을 쓰면 실제 키가 저장소 히스토리에 영구히 남는다.
+
+커밋 전 확인:
+
+```bash
+grep -nE '^[A-Z_]+=.+' .env.example
+```
+
+URL 두 줄 외에 결과가 나오면 값이 섞여 들어간 것이다.
+
 ## `.env`에 저장할 값
 
 프로젝트 루트의 [`.env.example`](../.env.example)을 참고해 아래 네 값을 `.env`에 둔다. URL은 미리 채워져 있다.
