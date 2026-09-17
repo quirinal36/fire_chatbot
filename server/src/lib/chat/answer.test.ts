@@ -185,5 +185,7 @@ describe('법령 일반 설명과 건물 판정 구분', () => {
   it('질문자 건물에 대한 단정은 거부', () => {
     expect(validateAnswer(answer('말씀하신 학원은 피난기구를 설치하지 않아도 됩니다.'), ctx).ok).toBe(false);
     expect(validateAnswer(answer('우리 학원이 2층이라면 설치하지 않아도 됩니다.'), ctx).ok).toBe(true);
+    // 제외 조건(유도등 설치)을 빼고 학원 계단 전체를 제외라고 단정한 실제 오답 (2026-09-18 운영 재시험)
+    expect(validateAnswer(answer('학원 계단에는 유도표지를 설치하지 않아도 됩니다.'), ctx).ok).toBe(false);
   });
 });
