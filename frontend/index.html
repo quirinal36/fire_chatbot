@@ -6,7 +6,7 @@
     <title>소방본부 AI 상담</title>
     <meta
       name="description"
-      content="도면, 소방법, 신규 건축물 문의를 위한 소방본부 AI 상담 챗봇"
+      content="소방법, 신규 건축물, 소방시설 설치 기준 문의를 위한 소방본부 AI 상담 챗봇"
     />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,7 +20,7 @@
   <body>
     <!--
       3단 세로 레이아웃.
-      좌: 대화 목록 / 중: 채팅 / 우: 도면 패널 (아티팩트가 생길 때 열립니다)
+      좌: 대화 목록 / 중: 채팅 / 우: 검토 패널 (검토 결과가 생길 때 열립니다)
       각 칸 사이의 button.resizer 를 드래그하면 폭이 조절됩니다.
       내용은 src/main.ts 가 채웁니다.
     -->
@@ -35,9 +35,9 @@
         <div class="composer-wrap"></div>
       </main>
 
-      <button class="resizer" data-target="panel" aria-label="도면 패널 폭 조절" hidden></button>
+      <button class="resizer" data-target="panel" aria-label="검토 패널 폭 조절" hidden></button>
 
-      <section class="panel" aria-label="도면 검토 결과" hidden></section>
+      <section class="panel" aria-label="검토 결과" hidden></section>
     </div>
 
     <div class="modal" hidden></div>

@@ -11,7 +11,7 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
     </div>
     <div class="chat__actions">
       <button type="button" class="btn btn--compact" data-action="toggle-panel">
-        ${icons.panel()} 도면 패널
+        ${icons.panel()} 검토 패널
       </button>
       <button type="button" class="btn btn--compact btn--primary" data-action="login">로그인</button>
       <button type="button" class="btn btn--compact" data-action="logout" hidden>로그아웃</button>
@@ -44,7 +44,7 @@ export function mountChatHeader(root: HTMLElement, actions: AppActions): Compone
       logoutBtn.hidden = anonymous;
 
       panelBtn.setAttribute('aria-expanded', String(state.panelOpen));
-      panelBtn.innerHTML = `${icons.panel()} ${esc(state.panelOpen ? '패널 닫기' : '도면 패널')}`;
+      panelBtn.innerHTML = `${icons.panel()} ${esc(state.panelOpen ? '패널 닫기' : '검토 패널')}`;
     },
   };
 }

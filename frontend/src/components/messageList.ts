@@ -1,5 +1,6 @@
 import { esc, inlineMarkup, must } from '../lib/dom';
 import { icons } from '../lib/icons';
+import { FEATURES } from '../config';
 import type { AppActions } from '../actions';
 import type { AssistantMessage, Message, UserMessage } from '../types';
 import type { Component } from './sidebar';
@@ -49,6 +50,8 @@ function renderAssistant(msg: AssistantMessage): string {
     msg.actions === undefined || msg.actions.length === 0
       ? ''
       : `<div class="msg__actions">${msg.actions
+          // 도면에서 보기는 기획서 §2.2 의 후속 범위다. src/config.ts 참고.
+          .filter((action) => action.id !== 'open-panel' || FEATURES.planPanel)
           .map((action) => {
             const icon = action.id === 'open-panel' ? `${icons.grid()} ` : '';
             return `<button type="button" class="btn btn--compact"
@@ -78,7 +81,7 @@ function renderMessage(msg: Message): string {
 const EMPTY_STATE = `<article class="msg msg--assistant">
   <span class="msg__avatar" aria-hidden="true">${icons.flame(16)}</span>
   <div class="msg__body">
-    <p>무엇을 도와드릴까요? 도면을 첨부하면 소방시설 배치를 함께 검토합니다.</p>
+    <p>무엇을 도와드릴까요? 소방시설 설치 기준과 근거 법령을 찾아 드립니다.</p>
     <p class="disclaimer">로그인하지 않아도 질문할 수 있습니다.</p>
   </div>
 </article>`;

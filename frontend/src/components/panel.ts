@@ -1,3 +1,4 @@
+import { FEATURES } from '../config';
 import { esc, must, onAction } from '../lib/dom';
 import { icons } from '../lib/icons';
 import { planSvg } from '../data/plan';
@@ -6,11 +7,14 @@ import type { AppActions } from '../actions';
 import type { PanelTab, Review } from '../types';
 import type { Component } from './sidebar';
 
-const TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
+const ALL_TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
   { id: 'plan', label: '도면' },
   { id: 'law', label: '법령' },
   { id: 'check', label: '체크리스트' },
 ];
+
+// 기획서 §2.2 에 따라 도면 탭은 1차 출시에서 제외한다. src/config.ts 참고.
+const TABS = ALL_TABS.filter((tab) => tab.id !== 'plan' || FEATURES.planPanel);
 
 function renderPlan(review: Review): string {
   const stats = review.stats
@@ -107,11 +111,15 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
         tab.setAttribute('aria-selected', String(tab.dataset['tab'] === state.panelTab));
       }
 
-      if (lastTab === state.panelTab) return;
-      lastTab = state.panelTab;
+      // 꺼진 탭이 요청되면 법령으로 떨어뜨린다. 빈 패널이 열리지 않게 한다.
+      const tab: PanelTab =
+        state.panelTab === 'plan' && !FEATURES.planPanel ? 'law' : state.panelTab;
 
-      if (state.panelTab === 'plan') body.innerHTML = renderPlan(sampleReview);
-      else if (state.panelTab === 'law') body.innerHTML = renderLaw(sampleReview);
+      if (lastTab === tab) return;
+      lastTab = tab;
+
+      if (tab === 'plan') body.innerHTML = renderPlan(sampleReview);
+      else if (tab === 'law') body.innerHTML = renderLaw(sampleReview);
       else body.innerHTML = renderChecks(sampleReview);
     },
   };

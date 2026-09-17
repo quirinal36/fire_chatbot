@@ -14,7 +14,7 @@ export function mountSidebar(root: HTMLElement, actions: AppActions): Component 
       <span class="brand__mark">${icons.flame(18)}</span>
       <span>
         <span class="brand__name">소방본부 AI 상담</span>
-        <span class="brand__sub">도면 · 소방법 · 신규 건축물</span>
+        <span class="brand__sub">소방법 · 신규 건축물 · 설치 기준</span>
       </span>
     </div>
 
@@ -60,7 +60,7 @@ export function mountSidebar(root: HTMLElement, actions: AppActions): Component 
       accountSlot.innerHTML =
         user === null
           ? `<div class="account">
-              <p class="account__hint">로그인하면 대화 기록과 도면이 저장됩니다.</p>
+              <p class="account__hint">로그인하면 대화 기록이 계정에 저장됩니다.</p>
               <button type="button" class="btn btn--primary" data-action="login">로그인</button>
             </div>`
           : `<div class="account account--in">

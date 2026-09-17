@@ -10,7 +10,7 @@ export function mountLoginModal(root: HTMLElement, actions: AppActions): Compone
       <div class="modal__head">
         <span class="modal__mark">${icons.flame(26)}</span>
         <h2 class="modal__title" id="login-title">소방본부 AI 상담</h2>
-        <p class="modal__sub">로그인하면 대화 기록과 업로드한 도면이 계정에 저장됩니다.</p>
+        <p class="modal__sub">로그인하면 대화 기록이 계정에 저장됩니다.</p>
       </div>
 
       <div class="providers">

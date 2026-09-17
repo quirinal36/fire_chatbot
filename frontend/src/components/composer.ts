@@ -1,3 +1,4 @@
+import { FEATURES } from '../config';
 import { must } from '../lib/dom';
 import { icons } from '../lib/icons';
 import type { AppActions } from '../actions';
@@ -11,10 +12,10 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
       <div class="composer__box">
         <label class="sr-only" for="composer-input">질문 입력</label>
         <textarea id="composer-input" class="composer__input" rows="2"
-          placeholder="도면, 소방법, 신규 건축물에 대해 질문하세요…"></textarea>
+          placeholder="소방법, 신규 건축물에 대해 질문하세요…"></textarea>
         <div class="composer__row">
           <div class="composer__tools">
-            <button type="button" class="btn btn--quiet btn--icon" aria-label="도면 첨부">
+            <button type="button" class="btn btn--quiet btn--icon" aria-label="도면 첨부" data-feature="planPanel">
               ${icons.clip()}
             </button>
             <button type="button" class="btn btn--quiet">
@@ -30,6 +31,10 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
       </p>
     </form>
   `;
+
+  // 도면 첨부는 기획서 §2.2 의 후속 범위다. src/config.ts 참고.
+  const attach = must<HTMLButtonElement>('[data-feature="planPanel"]', root);
+  attach.hidden = !FEATURES.planPanel;
 
   const form = must<HTMLFormElement>('form', root);
   const input = must<HTMLTextAreaElement>('#composer-input', root);

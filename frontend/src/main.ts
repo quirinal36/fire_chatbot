@@ -3,6 +3,7 @@ import './styles/base.css';
 import './styles/layout.css';
 import './styles/components.css';
 
+import { FEATURES } from './config';
 import { auth } from './auth';
 import { requestAnswer } from './api/chat';
 import { initialConversations } from './data/conversations';
@@ -51,7 +52,7 @@ const store = createStore<AppState>({
   user: null,
   loginOpen: false,
   panelOpen: window.innerWidth >= 1080,
-  panelTab: 'plan',
+  panelTab: FEATURES.planPanel ? 'plan' : 'law',
   sidebarWidth: stored.sidebar ?? 260,
   panelWidth: stored.panel ?? 520,
   pending: false,
