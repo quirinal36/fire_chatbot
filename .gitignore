@@ -7,3 +7,6 @@ dist
 
 # graphify 빌드 산출물 (graphify-out/graph.json 등). frontend/public/graph.html 로 재생성한다.
 graphify-out
+
+# Vercel CLI 연결 정보
+.vercel
