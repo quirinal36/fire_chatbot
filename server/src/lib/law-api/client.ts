@@ -48,8 +48,14 @@ export function classifyLawResponse(
 
   if (kind === 'search') {
     const root = Object.values(obj)[0] as Record<string, unknown> | undefined;
-    if (root?.resultCode !== '00') return { ok: false, reason: 'result_code', detail: String(root?.resultCode) };
+    if (root === undefined || typeof root !== 'object') return { ok: false, reason: 'invalid_json' };
+    // 행정규칙 별표 목록(admbyl)은 resultCode 를 주지 않는다. 있을 때만 검사한다.
+    if ('resultCode' in root && root.resultCode !== '00') {
+      return { ok: false, reason: 'result_code', detail: String(root.resultCode) };
+    }
+    if (!('totalCnt' in root)) return { ok: false, reason: 'invalid_json', detail: 'totalCnt 없음' };
   }
+  if (kind === 'service' && Object.keys(obj).length === 0) return { ok: false, reason: 'invalid_json', detail: '빈 본문' };
   return { ok: true, json: obj };
 }
 
