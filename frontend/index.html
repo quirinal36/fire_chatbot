@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>소방본부 AI 상담</title>
+    <meta
+      name="description"
+      content="도면, 소방법, 신규 건축물 문의를 위한 소방본부 AI 상담 챗봇"
+    />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@600;700&display=swap"
+    />
+  </head>
+
+  <body>
+    <!--
+      3단 세로 레이아웃.
+      좌: 대화 목록 / 중: 채팅 / 우: 도면 패널 (아티팩트가 생길 때 열립니다)
+      각 칸 사이의 button.resizer 를 드래그하면 폭이 조절됩니다.
+      내용은 src/main.ts 가 채웁니다.
+    -->
+    <div class="app">
+      <aside class="sidebar" aria-label="대화 목록"></aside>
+
+      <button class="resizer" data-target="sidebar" aria-label="사이드바 폭 조절"></button>
+
+      <main class="chat">
+        <header class="chat__header"></header>
+        <div class="messages" role="log" tabindex="0" aria-label="대화 내용"></div>
+        <div class="composer-wrap"></div>
+      </main>
+
+      <button class="resizer" data-target="panel" aria-label="도면 패널 폭 조절" hidden></button>
+
+      <section class="panel" aria-label="도면 검토 결과" hidden></section>
+    </div>
+
+    <div class="modal" hidden></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

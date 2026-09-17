@@ -4,6 +4,8 @@
 
 등록 완료: GitHub 이슈 #1~#32. 실제 이슈·마일스톤 링크는 [GitHub 등록 결과](github-registration.md)를 확인한다. GitHub 본문의 선행 작업은 실제 이슈 번호로 연결했다.
 
+진행 현황: 채팅 화면 프런트엔드 프로토타입을 `frontend/`에 구현했다. 상세는 ISS-016 · ISS-002의 진행 기록을 참고한다.
+
 각 `ISS-*` 절을 독립 GitHub 이슈로 등록한다. 절 제목은 이슈 제목, 메타데이터 다음 문장은 작업 범위, 체크리스트는 완료 조건이다. 선행 작업은 완료에 필요한 의존성으로, 설계·fixture 준비는 먼저 진행할 수 있다. 모든 이슈는 미착수이며 담당자 미지정이다.
 
 추천 labels: `priority:P0`, `priority:P1`; `type:decision`, `type:spike`, `type:feature`, `type:test`, `type:docs`, `type:ops`; `area:platform`, `area:ingestion`, `area:data`, `area:search`, `area:chat`, `area:rules`, `area:admin`, `area:security`. `needs:review`는 담당자 검토가 필요한 항목에 사용한다. 라벨은 등록 시 생성한다.
@@ -39,6 +41,12 @@ Next.js App Router·TypeScript·Node.js 서버 런타임, 제안 디렉터리, �
 - [ ] 기획서 환경변수의 값 없는 예시와 서버/브라우저 구분을 문서화했다.
 - [ ] 개발·Preview·운영 키 분리와 비밀값 저장소 제외, OC·Authorization 로그 마스킹을 적용했다.
 - [ ] Supabase 연결 및 Vercel Preview 배포를 확인하고 직접 DB 연결 사용 시 풀링을 설정했다.
+
+### 진행 기록 · 2026-09-17
+
+- `frontend/`에 Vite + TypeScript(프레임워크 없음) 기반 화면 프로토타입이 들어왔다. 본 이슈가 규정한 Next.js App Router 기반은 아직 구성되지 않았다.
+- 스택 결정 필요: (a) 이 프로토타입을 Next.js App Router로 이식하거나, (b) 프런트엔드를 정적 SPA로 유지하고 Next.js는 API 서버 역할만 맡는 구조로 간다. 결정 전까지 `frontend/`는 UI 참조 구현으로 취급한다.
+- 현재 `frontend/`는 `npm install` · `npm run typecheck` · `npm run build`가 통과한다. CI·환경변수 검증·Preview 배포는 미구성이므로 본 이슈의 완료 조건은 그대로 미충족이다.
 
 ## ISS-003 · 법령 API 실제 응답 및 권한 PoC
 
@@ -193,6 +201,30 @@ Next.js App Router·TypeScript·Node.js 서버 런타임, 제안 디렉터리, �
 - [ ] 답변 오류 신고가 해당 답변 실행과 연결되며 소유권을 검사한다.
 - [ ] 검색 안내와 승인된 시설 적용 판단을 구별해 표시한다.
 - [ ] 4주차 제품 검토를 수행하고 피드백·수정 내역을 기록했다.
+
+### 진행 기록 · 2026-09-17
+
+화면 프로토타입을 `frontend/`에 구현했다. 백엔드 연동은 없고, 연동 지점만 함수로 분리해 두었다.
+
+구현된 것
+
+- 3단 레이아웃(대화 목록 · 채팅 · 우측 검토 패널). 칸 폭 드래그/방향키 조절, `localStorage` 저장, 1080px 미만 반응형 동작.
+- 채팅 화면: 메시지 목록, 입력창, 응답 대기 상태, 답변 하단 면책 문구.
+- 우측 패널: 도면 탭·법령 검토 탭. 답변의 "도면에서 보기", 헤더의 "도면 패널", 법령 칩 클릭으로 열린다.
+- 로그인 모달(Google · 카카오 진입점). 비로그인 사용자도 질문할 수 있다.
+- 상태 관리: `src/lib/store.ts`의 구독형 저장소 하나. 컴포넌트는 `src/actions.ts`의 `AppActions`만 호출한다. 도메인 타입은 `src/types.ts`.
+- 디자인 토큰을 `src/styles/tokens.css`의 CSS 변수로 관리하며 시스템 설정 기반 다크 테마를 지원한다.
+
+미구현 (본 이슈 완료 조건 관련)
+
+- `src/api/chat.ts`는 고정 답변을 반환하는 목 구현이다. ISS-015의 `POST /api/chat`·SSE 연동이 필요하다.
+- `src/auth/index.ts`는 `MockAuthService`다. 토큰 검증 서버 구현은 ISS-013에 속한다.
+- 근거 카드는 `src/data/review.ts`의 예시 데이터로 그린다. ISS-011의 `GET /api/sources/:id` 연동이 필요하다.
+- 도면 평면도는 `src/data/plan.ts`의 고정 데이터이며 도면 첨부 버튼은 동작하지 않는다.
+- `POST /api/feedback` 오류 신고 UI, 진행/최종/근거 부족/오류 상태 구별, 검색 안내와 승인된 판정의 구별 표시는 아직 없다.
+- 4주차 제품 검토는 수행하지 않았다.
+
+따라서 본 이슈는 미완료 상태를 유지하며, 위 항목은 ISS-011 · ISS-013 · ISS-015 완료 후 연결한다. ISS-020(영업장 조건 카드)이 붙을 자리는 우측 패널이다.
 
 ## ISS-017 · 최초 업종 판단표와 정답 사례 승인
 

@@ -1,0 +1,113 @@
+/* ---------------------------------------------------------------------------
+   소방본부 디자인 시스템 — 토큰
+   claude.ai/artifact/NAKVmHQQG65KEnviQXpTr2 의 tokens.json 과 같은 값입니다.
+   값을 바꿔야 하면 디자인 시스템을 먼저 고치고 이 파일을 맞추세요.
+--------------------------------------------------------------------------- */
+
+:root {
+  /* 면 */
+  --surface-base: #faf9f5;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f0eee6;
+
+  /* 선 */
+  --border-subtle: #e5e2d9;
+  --border-strong: #ddd9cd;
+
+  /* 글자 */
+  --ink: #141413;
+  --ink-muted: #5e5d59;
+
+  /* 강조와 판정 */
+  --accent: #b5532f;
+  --accent-soft: #d97757;
+  --on-accent: #ffffff;
+  --success: #2f6f5e;
+
+  /* 고정 브랜드색 */
+  --kakao-yellow: #fee500;
+  --overlay: rgba(20, 20, 19, 0.45);
+
+  /* 글꼴 */
+  --font-sans: 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  --font-serif: 'Noto Serif KR', 'Apple SD Gothic Neo', serif;
+
+  /* 글자 크기 · 줄간격 */
+  --text-display-lg: 64px / 60px var(--font-serif);
+  --text-display-sm: 700 22px / 30px var(--font-serif);
+  --text-brand-mark: 700 15px / 20px var(--font-serif);
+  --text-message: 400 15px / 26px var(--font-sans);
+  --text-title: 600 15px / 22px var(--font-sans);
+  --text-label: 500 14px / 20px var(--font-sans);
+  --text-body-sm: 400 13px / 20px var(--font-sans);
+  --text-caption: 400 12px / 18px var(--font-sans);
+  --text-micro: 500 11px / 16px var(--font-sans);
+  --text-stat: 700 20px / 26px var(--font-sans);
+
+  /* 간격 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* 모서리 */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-bubble: 18px;
+  --radius-pill: 999px;
+
+  /* 그림자 */
+  --shadow-input: 0 2px 8px rgba(20, 20, 19, 0.05);
+  --shadow-modal: 0 20px 60px rgba(20, 20, 19, 0.25);
+
+  /* 레이아웃 한계 — 디자인 시스템의 "간격과 모서리" 절 참고 */
+  --sidebar-min: 200px;
+  --sidebar-max: 420px;
+  --panel-min: 360px;
+  --panel-max: 760px;
+  --handle-width: 6px;
+  --chat-measure: 720px;
+}
+
+/* 다크 테마 — 시스템 설정을 따르되, data-theme 으로 덮어쓸 수 있습니다. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --surface-base: #1b1a17;
+    --surface-raised: #24231f;
+    --surface-sunken: #2c2a25;
+    --border-subtle: #37352e;
+    --border-strong: #45423a;
+    --ink: #f3f0e8;
+    --ink-muted: #a8a49a;
+    --accent: #e08a63;
+    --accent-soft: #f0a583;
+    --on-accent: #1b1a17;
+    --success: #6cbfa6;
+    --overlay: rgba(10, 10, 9, 0.6);
+    --shadow-input: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  --surface-base: #1b1a17;
+  --surface-raised: #24231f;
+  --surface-sunken: #2c2a25;
+  --border-subtle: #37352e;
+  --border-strong: #45423a;
+  --ink: #f3f0e8;
+  --ink-muted: #a8a49a;
+  --accent: #e08a63;
+  --accent-soft: #f0a583;
+  --on-accent: #1b1a17;
+  --success: #6cbfa6;
+  --overlay: rgba(10, 10, 9, 0.6);
+  --shadow-input: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.5);
+}

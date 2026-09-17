@@ -1,0 +1,17 @@
+{
+  "name": "fire-chatbot",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "소방본부 AI 상담 챗봇 — 도면·소방법·신규 건축물 문의 UI",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.0",
+    "vite": "^8.0.0"
+  }
+}

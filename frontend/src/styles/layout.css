@@ -1,0 +1,90 @@
+/* 3단 세로 레이아웃과 드래그 핸들 */
+
+.app {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* 드래그 중에는 텍스트 선택과 커서가 흔들리지 않게 잡아 둡니다. */
+.app.is-dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.sidebar {
+  flex: 0 0 auto;
+  width: var(--sidebar-width, 260px);
+  min-width: var(--sidebar-min);
+  max-width: var(--sidebar-max);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-base);
+}
+
+.panel {
+  flex: 0 0 auto;
+  width: var(--panel-width, 520px);
+  min-width: var(--panel-min);
+  max-width: var(--panel-max);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.panel[hidden],
+.resizer[hidden] {
+  display: none;
+}
+
+.resizer {
+  flex: 0 0 auto;
+  width: var(--handle-width);
+  border: 0;
+  padding: 0;
+  background: var(--border-subtle);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer.is-active {
+  background: var(--border-strong);
+}
+
+/* 좁은 화면에서는 3단을 유지할 수 없으므로 패널을 덮어씌웁니다. */
+@media (max-width: 1080px) {
+  .sidebar {
+    display: none;
+  }
+
+  .resizer[data-target='sidebar'] {
+    display: none;
+  }
+
+  .panel {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(92vw, var(--panel-max));
+    z-index: 20;
+    box-shadow: var(--shadow-modal);
+  }
+
+  .resizer[data-target='panel'] {
+    display: none;
+  }
+}
