@@ -47,6 +47,10 @@ Next.js App Router·TypeScript·Node.js 서버 런타임, 제안 디렉터리, �
 - `frontend/`에 Vite + TypeScript(프레임워크 없음) 기반 화면 프로토타입이 들어왔다. 본 이슈가 규정한 Next.js App Router 기반은 아직 구성되지 않았다.
 - 스택 결정 필요: (a) 이 프로토타입을 Next.js App Router로 이식하거나, (b) 프런트엔드를 정적 SPA로 유지하고 Next.js는 API 서버 역할만 맡는 구조로 간다. 결정 전까지 `frontend/`는 UI 참조 구현으로 취급한다.
 - 현재 `frontend/`는 `npm install` · `npm run typecheck` · `npm run build`가 통과한다. CI·환경변수 검증·Preview 배포는 미구성이므로 본 이슈의 완료 조건은 그대로 미충족이다.
+- **결정:** (b) 정적 SPA + Next.js API 서버. Vercel 프로젝트 두 개(`fire-chatbot-web` ← `frontend/`, `fire-chatbot-server` ← `server/`)로 나눈다.
+- `server/` 스캐폴드, CI(`.github/workflows/ci.yml`), 환경변수 요청 시점 검증, 로그 마스킹, CORS 허용 목록, Bearer/쿠키 겸용 요청자 확인을 구성했다. Supabase 연결과 Vercel 배포(`https://fire-chatbot-server.vercel.app/api/health`)를 확인했다.
+- 인증 전달: 공유 상위 도메인 쿠키가 목표. 도메인이 없으므로 당분간 Bearer 토큰. `AUTH_COOKIE_DOMAIN` 설정으로 전환한다.
+- 남은 것: 개발·Preview·운영 키 분리(현재 같은 키), 직접 DB 연결 풀링(아직 직접 연결 없음).
 
 ## ISS-003 · 법령 API 실제 응답 및 권한 PoC
 
