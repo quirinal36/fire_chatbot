@@ -72,7 +72,7 @@ describe('validateAnswer', () => {
   });
   it('URL 과 규칙 없는 판정을 막는다', () => {
     expect(validateAnswer(good.replace('있습니다.', 'https://law.go.kr 참고.'), ctx)).toMatchObject({ ok: false });
-    expect(validateAnswer(good.replace('기준에 걸립니다.', '설치 대상이 아닙니다.'), ctx)).toMatchObject({ ok: false });
+    expect(validateAnswer(good.replace('연면적 33㎡ 이상이면 소화기구 설치 대상 기준에 걸립니다.', '질문하신 학원은 설치 대상이 아닙니다.'), ctx)).toMatchObject({ ok: false });
   });
 });
 
@@ -172,5 +172,18 @@ describe('규칙 결과와의 충돌', () => {
     expect(conflictsWithAssessment(['소화기구를 설치해야 합니다.'], [a('소화기구', 'applicable')])).toEqual([]);
     expect(conflictsWithAssessment(['연면적이 33㎡ 이상이면 소화기구를 설치해야 합니다.'], [a('소화기구', 'needs_review')])).toEqual([]);
     expect(conflictsWithAssessment(['간이스프링클러설비는 설치 대상이 아닙니다.'], [a('스프링클러설비', 'applicable'), a('간이스프링클러설비', 'not_applicable')])).toEqual([]);
+  });
+});
+
+describe('법령 일반 설명과 건물 판정 구분', () => {
+  const ctx = { refs: new Set(['S1']), evidence: [ev()], question: '피난기구를 설치하지 않아도 되는 층은?', hasAssessment: false };
+  const answer = (text: string) =>
+    JSON.stringify({ mode: 'legal_search', summary: '피난기구 제외 층을 안내합니다.', statements: [{ text, sourceIds: ['S1'] }], followUpQuestions: [], limitations: [] });
+  it('법령 일반 설명은 허용', () => {
+    expect(validateAnswer(answer('피난층, 지상 1층과 2층에는 피난기구를 설치하지 않아도 됩니다.'), ctx).ok).toBe(true);
+  });
+  it('질문자 건물에 대한 단정은 거부', () => {
+    expect(validateAnswer(answer('말씀하신 학원은 피난기구를 설치하지 않아도 됩니다.'), ctx).ok).toBe(false);
+    expect(validateAnswer(answer('우리 학원이 2층이라면 설치하지 않아도 됩니다.'), ctx).ok).toBe(true);
   });
 });

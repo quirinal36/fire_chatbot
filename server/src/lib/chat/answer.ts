@@ -51,6 +51,8 @@ export interface GenerateResult {
 
 const URL_PATTERN = /(https?:\/\/|www\.)/iu;
 const LOCATOR_PATTERN = /제\s*(\d+)\s*조(?:\s*의\s*(\d+))?|별표\s*(\d+)(?:\s*의\s*(\d+))?/gu;
+/** 질문자의 건물·영업장을 가리키는 표현. 법령 일반 설명과 특정 건물 판정을 가른다 */
+const CASE_REFERENCE = /(귀하|질문하신|말씀하신|문의하신|해당\s*(?:학원|건물|영업장|시설)|이\s*(?:학원|건물|영업장)|우리|저희|고객님|운영하시는|영업장은|학원은|건물은)/u;
 /** 규칙 결과 없이 모델이 설치 대상 여부를 단정하는 표현 */
 const VERDICT_PATTERN = /(설치\s*대상이\s*아닙니다|설치하지\s*않아도\s*됩니다|설치\s*의무가\s*없습니다|해당하지\s*않습니다|설치\s*대상입니다|반드시\s*설치해야\s*합니다)/u;
 
@@ -147,7 +149,9 @@ export function validateAnswer(
     errors.push('요약의 기준·수치를 statements 에 근거와 함께 적어야 한다');
   }
 
-  if (!ctx.hasAssessment && texts.some((t) => VERDICT_PATTERN.test(t))) {
+  // 법령 일반 설명("피난층은 설치하지 않아도 됩니다")은 허용하고, 질문자 건물에 대한 단정만 막는다
+  const sentences = texts.flatMap((t) => t.split(/(?<=[.!?다])\s+/u));
+  if (!ctx.hasAssessment && sentences.some((t) => VERDICT_PATTERN.test(t) && CASE_REFERENCE.test(t) && !/(이면|라면|경우|인지|확인)/u.test(t))) {
     errors.push('규칙 결과 없이 설치 대상 여부를 단정했다');
   }
 
