@@ -21,10 +21,33 @@ npm run dev        # http://localhost:3001
 ## 경로
 
 | 경로 | 설명 |
-| --- | --- |
+|---|---|
 | `GET /api/health` | 환경변수 설정 여부. `?deep=1`이면 Supabase 연결까지 확인 |
-| `GET /api/me` | 요청자 확인. Bearer 토큰 또는 공유 도메인 쿠키 |
-| `GET /api/diagnostics/law-api` | 배포 환경의 법령 API 동작과 송신 IP. `Authorization: Bearer <DIAGNOSTICS_TOKEN>` |
+| `GET /api/me` | 요청자 확인 |
+| `POST /api/chat` | 질문 → SSE(status·answer·error) |
+| `GET /api/sessions`, `GET /api/sessions/:id/messages` | 내 대화 목록·내용 |
+| `GET /api/sources/:id` | 근거 카드 (버전 고정) |
+| `POST /api/feedback` | 답변 오류 신고 |
+| `POST /api/cases`, `GET·PATCH /api/cases/:id`, `POST /api/cases/:id/extract` | 영업장 조건·규칙 판단 |
+| `GET /api/case-fields` | 조건 입력 항목 정의 |
+| `GET /api/admin/*`, `POST /api/admin/reviews/:id` 등 | 관리자 (검토자·관리자만) |
+| `GET /api/cron/ingestion` | 매일 개정 확인 (`CRON_SECRET`) |
+| `GET /api/diagnostics/law-api` | 배포 환경의 법령 API 점검 (`DIAGNOSTICS_TOKEN`) |
+
+## CLI
+
+| 명령 | 하는 일 |
+|---|---|
+| `npm run ingest` | 선정 법령 수집 |
+| `npm run index-corpus` | 검색 조각·임베딩 |
+| `npm run publish-corpus` | 검토 근거와 함께 버전 게시 |
+| `npm run search -- "질문"` | 검색 확인 |
+| `npm run eval-search`, `npm run eval-chat` | 검색 품질, 답변 안전성 평가 |
+| `npm run rules -- sync·status·review·table` | 판단 규칙 동기화·승인·판단표 생성 |
+| `npm run admin -- add·list·remove` | 관리자 계정 |
+| `npm run jobs -- enqueue·run` | 작업 큐 |
+
+운영 절차는 [docs/operations.md](../docs/operations.md)에 있다.
 
 ## 구조
 
@@ -43,3 +66,11 @@ src/lib/law-api/        법령 API 호출과 공통 계약 검증 (HTTP 200 오�
 화면과 API의 오리진이 다릅니다. 공유 상위 도메인이 정해질 때까지는 화면이 Supabase access token을 `Authorization: Bearer`로 보냅니다. 도메인이 정해지면 `AUTH_COOKIE_DOMAIN`을 설정해 쿠키로 전환합니다. 서버는 두 방식을 모두 읽습니다.
 
 CORS는 `CORS_ALLOWED_ORIGINS`에 적힌 오리진만 허용합니다. 쿠키 전환 시 credentials를 쓰므로 와일드카드는 쓰지 않습니다.
+
+**도메인 전환 절차** (예: `app.example.kr` / `api.example.kr`)
+
+1. Vercel 두 프로젝트에 도메인 연결
+2. server 환경변수: `CORS_ALLOWED_ORIGINS=https://app.example.kr`, `AUTH_COOKIE_DOMAIN=.example.kr`
+3. web 환경변수: `VITE_API_BASE_URL=https://api.example.kr`
+4. Supabase Auth: `site_url`과 허용 URL에 `https://app.example.kr/**` 추가, Google·카카오 제공자 키 입력
+5. 화면의 인증 저장소를 쿠키 저장으로 바꾼다(`frontend/src/auth/index.ts`의 `storage`)
