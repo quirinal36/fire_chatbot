@@ -1,5 +1,7 @@
 import { esc, must } from '../lib/dom';
 import { inline, renderRich } from '../lib/markdown';
+import { answerInput, composeAnswers, questionLabel, type AnswerInput } from '../lib/followup';
+import { CASE_FIELD_KEYS } from './caseCard';
 import { icons } from '../lib/icons';
 import { FEEDBACK_LABEL, type FeedbackCategory } from '../api/feedback';
 import type { AppActions } from '../actions';
@@ -10,7 +12,8 @@ function renderUser(msg: UserMessage): string {
   return `<article class="msg msg--user"><p class="bubble">${esc(msg.text)}</p></article>`;
 }
 
-const CASE_FIELD = /^[a-z][a-z0-9_]*$/;
+/** 영업장 조건 카드에서 받는 항목. 이 질문은 조건 입력 칸을 열어야 판정에 반영된다 */
+const CASE_FIELDS = new Set(CASE_FIELD_KEYS);
 
 const STATUS_NOTE: Partial<Record<AnswerEnvelope['status'], { tone: string; text: string }>> = {
   insufficient_evidence: { tone: 'flag', text: '조금 더 알려 주시면 근거를 찾을 수 있어요' },
@@ -44,6 +47,74 @@ function renderFeedback(msg: AssistantMessage): string {
       <button type="submit" class="btn btn--compact btn--primary" ${msg.feedback === 'sending' ? 'disabled' : ''}>
         ${msg.feedback === 'sending' ? '보내는 중…' : '신고 보내기'}</button>
     </form>`;
+}
+
+/**
+ * 되묻는 질문은 사용자가 "답할" 것이지 "물을" 것이 아니다 (ISS-036).
+ * 질문마다 답을 받는 칸을 그리고, 답한 것만 모아 한 번에 보낸다.
+ */
+function renderAnswerField(input: AnswerInput): string {
+  switch (input.kind) {
+    case 'boolean':
+      return `<div class="askback__opts" role="group">
+        ${['예', '아니오', '모르겠어요']
+          .map((v) => `<button type="button" class="chip" data-action="pick-answer" data-opt="${esc(v)}" aria-pressed="false">${esc(v)}</button>`)
+          .join('')}
+      </div>`;
+    case 'choice':
+      return `<div class="askback__opts" role="group">
+          ${input.options
+            .map((o) => `<button type="button" class="chip" data-action="pick-answer" data-opt="${esc(o)}" aria-pressed="false">${esc(o)}</button>`)
+            .join('')}
+        </div>
+        <input type="text" class="askback__text-input" name="answer" placeholder="직접 입력" autocomplete="off" />`;
+    case 'number':
+      return `<span class="askback__num">
+        <input type="number" class="askback__text-input" name="answer" step="any" min="0" inputmode="decimal" placeholder="숫자" />
+        <span>${esc(input.unit)}</span>
+      </span>`;
+    case 'date':
+      return `<input type="date" class="askback__text-input" name="answer" />`;
+    default:
+      return `<input type="text" class="askback__text-input" name="answer" placeholder="${esc(input.placeholder)}" autocomplete="off" />`;
+  }
+}
+
+function renderAskBack(msg: AssistantMessage, hasCase: boolean): string {
+  const questions = msg.envelope.answer.followUpQuestions;
+  if (questions.length === 0) return '';
+
+  // 영업장 조건 항목은 여기서 받지 않는다. 조건 입력 칸에서 받아야 판정에 쓰인다
+  const caseQs = hasCase ? questions.filter((q) => CASE_FIELDS.has(q.field)) : [];
+  const askQs = questions.filter((q) => !caseQs.includes(q));
+
+  const rows = askQs
+    .map((q) => {
+      const input = answerInput(q.question);
+      return `<div class="askback__q" data-question="${esc(questionLabel(q.question))}" data-kind="${input.kind}"
+        data-unit="${input.kind === 'number' ? esc(input.unit) : ''}">
+        <p class="askback__text">${inline(questionLabel(q.question))}</p>
+        ${renderAnswerField(input)}
+      </div>`;
+    })
+    .join('');
+
+  const caseRows = caseQs
+    .map((q) => `<button type="button" class="chip" data-action="open-case">${esc(q.question)} ›</button>`)
+    .join('');
+
+  return `<div class="followups">
+    <p class="followups__label">${
+      msg.envelope.status === 'insufficient_evidence' ? '아래를 알려 주세요' : '더 정확히 안내하려면 알려 주세요'
+    }</p>
+    ${rows ? `<form class="askback" data-id="${esc(msg.id)}">${rows}
+      <div class="askback__send">
+        <button type="submit" class="btn btn--compact btn--primary">알려 준 내용으로 다시 찾기</button>
+        <span class="askback__hint" role="status"></span>
+      </div>
+    </form>` : ''}
+    ${caseRows}
+  </div>`;
 }
 
 function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: boolean): string {
@@ -88,18 +159,7 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
       ? `<p class="search-note">검색된 법령 안내입니다. 이 영업장의 설치 대상 여부를 판정한 결과가 아닙니다.</p>`
       : '';
 
-  const followUps = a.followUpQuestions.length
-    ? `<div class="followups"><p class="followups__label">${
-        e.status === 'insufficient_evidence' ? '아래를 알려 주세요' : '더 정확히 안내하려면'
-      }</p>${a.followUpQuestions
-        .map((q) =>
-          // 영업장 조건 항목이면 질문으로 보내지 않고 조건 입력 칸을 연다
-          hasCase && CASE_FIELD.test(q.field)
-            ? `<button type="button" class="chip" data-action="open-case">${esc(q.question)} ›</button>`
-            : `<button type="button" class="chip" data-action="follow-up" data-text="${esc(q.question)}">${esc(q.question)}</button>`,
-        )
-        .join('')}</div>`
-    : '';
+  const followUps = renderAskBack(msg, hasCase);
 
   const limitations = a.limitations.length
     ? `<ul class="limits">${a.limitations.map((l) => `<li>${inline(l)}</li>`).join('')}</ul>`
@@ -205,6 +265,16 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
       case 'follow-up':
         if (!busy) actions.sendMessage(el.dataset['text'] ?? '');
         break;
+      case 'pick-answer': {
+        // 한 질문에서 하나만 고른다. 고르면 직접 입력 칸은 비운다
+        const group = el.closest('.askback__opts');
+        const picked = el.getAttribute('aria-pressed') === 'true';
+        group?.querySelectorAll('[data-action="pick-answer"]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+        el.setAttribute('aria-pressed', picked ? 'false' : 'true');
+        const text = el.closest('.askback__q')?.querySelector<HTMLInputElement>('.askback__text-input');
+        if (text && !picked) text.value = '';
+        break;
+      }
       case 'open-case':
         actions.openPanel('check');
         break;
@@ -215,6 +285,29 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
         actions.toggleFeedback(id);
         break;
     }
+  });
+
+  // 되묻는 질문에 답한 내용을 모아 한 번에 보낸다 (ISS-036)
+  root.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('askback')) return;
+    event.preventDefault();
+    if (busy) return;
+    const pairs = [...form.querySelectorAll<HTMLElement>('.askback__q')].map((row) => {
+      const picked = row.querySelector<HTMLElement>('[data-action="pick-answer"][aria-pressed="true"]');
+      const typed = row.querySelector<HTMLInputElement>('.askback__text-input')?.value.trim() ?? '';
+      const unit = row.dataset['unit'] ?? '';
+      const answer = picked?.dataset['opt'] ?? (typed === '' ? '' : `${typed}${unit}`);
+      return { question: row.dataset['question'] ?? '', answer };
+    });
+    const text = composeAnswers(pairs);
+    const hint = form.querySelector('.askback__hint');
+    if (text === '') {
+      if (hint) hint.textContent = '하나 이상 답해 주세요.';
+      return;
+    }
+    if (hint) hint.textContent = '';
+    actions.sendMessage(text);
   });
 
   root.addEventListener('submit', (event) => {

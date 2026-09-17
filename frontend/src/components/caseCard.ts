@@ -16,6 +16,9 @@ const GROUPS: ReadonlyArray<{ title: string; keys: readonly string[] }> = [
   { title: '적용 시점', keys: ['event_type', 'existing_has_sprinkler', 'event_date'] },
 ];
 
+/** 조건 카드에서 받는 항목 키. 되묻기에서 이 항목은 조건 입력 칸으로 보낸다 (ISS-036) */
+export const CASE_FIELD_KEYS: readonly string[] = GROUPS.flatMap((g) => g.keys);
+
 const STATUS = {
   applicable: { label: '해당', tone: 'flag' },
   not_applicable: { label: '비해당', tone: 'pass' },

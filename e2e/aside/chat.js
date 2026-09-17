@@ -11,6 +11,14 @@ const errors = [];
 
 await openTab(base);
 await page.waitForSelector('.app[data-ready="true"]', { timeout: 20000 });
+
+// 시험을 돌릴 때마다 같은 익명 계정에 질문이 쌓여 하루 한도(기본 30건)에 걸린다.
+// 저장된 로그인 토큰을 지워 새 익명 세션으로 시작한다
+await page.evaluate(() => {
+  for (const k of Object.keys(localStorage)) if (k.startsWith('sb-')) localStorage.removeItem(k);
+});
+await page.reload();
+await page.waitForSelector('.app[data-ready="true"]', { timeout: 20000 });
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => (m.type() === 'error' ? errors.push(m.text()) : null));
 await fs.mkdir(out, { recursive: true });

@@ -891,6 +891,81 @@
   flex-basis: 100%;
 }
 
+/* 되묻는 질문에 답을 입력하는 양식 (ISS-036) */
+.askback {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.askback__q {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.askback__text {
+  flex-basis: 100%;
+  margin: 0;
+  font: var(--text-body-sm);
+}
+
+.askback__opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.askback__opts .chip {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+}
+
+.askback__opts .chip[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface-base);
+}
+
+.askback__text-input {
+  flex: 1 1 8rem;
+  min-width: 0;
+  padding: 5px var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  font: var(--text-body-sm);
+  color: var(--ink);
+}
+
+.askback__num {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.askback__num .askback__text-input {
+  flex: 0 1 7rem;
+}
+
+.askback__send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.askback__hint {
+  font: var(--text-caption);
+  color: var(--accent);
+}
+
 .limits {
   margin: 0;
   padding-left: var(--space-6);
