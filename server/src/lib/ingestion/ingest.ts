@@ -15,7 +15,7 @@ import type { RawDocument } from '../law-api/types';
 import { redactSecrets } from '../redact';
 import { downloadAttachment, type AttachmentResult } from './attachments';
 import { entryLabel, type CatalogEntry } from './catalog';
-import { normalizeDocument, type NormalizedUnit } from './normalize';
+import { normalizeDocument, PARSER_VERSION, type NormalizedUnit } from './normalize';
 
 export interface FetchedVersion {
   readonly doc: RawDocument;
@@ -36,13 +36,16 @@ export interface NewVersionInput {
 }
 
 export interface IngestStore {
-  findVersion(doc: RawDocument): Promise<{ id: string; contentHash: string } | null>;
+  findVersion(doc: RawDocument): Promise<{ id: string; contentHash: string; parserVersion: string } | null>;
   saveNewVersion(input: NewVersionInput): Promise<{ versionId: string; unitCount: number }>;
+  /** 같은 원문을 새 정규화 규칙으로 다시 저장한다. 규칙이 참조 중이면 실패한다 */
+  replaceUnits(versionId: string, units: readonly NormalizedUnit[]): Promise<number>;
 }
 
 export type DocumentOutcome =
   | { label: string; status: 'new'; versionId: string; units: number; needsReview: number; missing: string[]; attachmentFailures: string[] }
   | { label: string; status: 'unchanged'; versionId: string }
+  | { label: string; status: 'reparsed'; versionId: string; units: number; needsReview: number }
   | { label: string; status: 'conflict'; versionId: string; detail: string }
   | { label: string; status: 'failed'; error: string; retryable: boolean };
 
@@ -127,6 +130,17 @@ async function ingestVersion(entry: CatalogEntry, fetched: FetchedVersion, opts:
 
   const existing = await opts.store.findVersion(fetched.doc);
   if (existing) {
+    if (existing.contentHash === contentHash && existing.parserVersion !== PARSER_VERSION) {
+      const units = normalizeDocument(fetched.doc);
+      const count = await opts.store.replaceUnits(existing.id, units);
+      return {
+        label,
+        status: 'reparsed',
+        versionId: existing.id,
+        units: count,
+        needsReview: units.filter((u) => u.parseStatus === 'needs_review').length,
+      };
+    }
     return existing.contentHash === contentHash
       ? { label, status: 'unchanged', versionId: existing.id }
       : {

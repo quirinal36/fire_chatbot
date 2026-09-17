@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RawDocument } from '../law-api/types';
 import type { IngestStore, NewVersionInput } from './ingest';
+import { PARSER_VERSION, type NormalizedUnit } from './normalize';
 
 export const RAW_BUCKET = 'raw-sources';
 
@@ -44,6 +45,22 @@ async function upload(db: SupabaseClient, path: string, body: Uint8Array | strin
   if (error && !/exists|Duplicate/i.test(error.message)) throw new Error(`Storage 저장 실패 (${path}): ${error.message}`);
 }
 
+function unitRows(units: readonly NormalizedUnit[], attachment: (u: NormalizedUnit) => string | null) {
+  const ids = new Map(units.map((u) => [u.key, randomUUID()]));
+  return units.map((u) => ({
+    id: ids.get(u.key),
+    parent_id: u.parentKey ? ids.get(u.parentKey) : null,
+    unit_type: u.unitType,
+    locator: u.locator,
+    ordinal: u.ordinal,
+    heading: u.heading,
+    text: u.text,
+    attachment_path: attachment(u),
+    parse_status: u.parseStatus,
+    parse_notes: u.parseNotes,
+  }));
+}
+
 export function supabaseIngestStore(db: SupabaseClient): IngestStore {
   return {
     async findVersion(doc) {
@@ -51,13 +68,13 @@ export function supabaseIngestStore(db: SupabaseClient): IngestStore {
       if (docId === null) return null;
       let q = db
         .from('legal_versions')
-        .select('id, content_hash')
+        .select('id, content_hash, parser_version')
         .eq('document_id', docId)
         .eq('source_version_id', doc.versionId);
       q = doc.effectiveDate ? q.eq('effective_date', doc.effectiveDate) : q.is('effective_date', null);
       const { data, error } = await q.maybeSingle();
       if (error) throw new Error(`버전 조회 실패: ${error.message}`);
-      return data ? { id: data.id, contentHash: data.content_hash } : null;
+      return data ? { id: data.id, contentHash: data.content_hash, parserVersion: data.parser_version } : null;
     },
 
     async saveNewVersion(input: NewVersionInput) {
@@ -74,7 +91,6 @@ export function supabaseIngestStore(db: SupabaseClient): IngestStore {
         attachmentPath.set(a.unitKey, path);
       }
 
-      const ids = new Map(input.units.map((u) => [u.key, randomUUID()]));
       const payload = {
         document: {
           source_type: doc.sourceType,
@@ -91,25 +107,33 @@ export function supabaseIngestStore(db: SupabaseClient): IngestStore {
           source_url: officialPageUrl(doc),
           raw_path: `${base}.json`,
           content_hash: input.contentHash,
+          parser_version: PARSER_VERSION,
         },
-        units: input.units.map((u) => ({
-          id: ids.get(u.key),
-          parent_id: u.parentKey ? ids.get(u.parentKey) : null,
-          unit_type: u.unitType,
-          locator: u.locator,
-          ordinal: u.ordinal,
-          heading: u.heading,
-          text: u.text,
-          attachment_path: attachmentPath.get(u.key) ?? null,
-          parse_status: u.parseStatus,
-          parse_notes: u.parseNotes,
-        })),
+        units: unitRows(input.units, (u) => attachmentPath.get(u.key) ?? null),
       };
 
       const { data, error } = await db.rpc('ingest_version', { p: payload });
       if (error) throw new Error(`버전 저장 실패: ${error.message}`);
       const result = data as { status: string; version_id: string; unit_count?: number };
       return { versionId: result.version_id, unitCount: result.unit_count ?? 0 };
+    },
+
+    async replaceUnits(versionId, units) {
+      // 첨부 파일은 다시 받지 않는다. 같은 locator 의 기존 경로를 옮겨 붙인다
+      const { data: old, error } = await db
+        .from('legal_units')
+        .select('locator, attachment_path')
+        .eq('version_id', versionId)
+        .not('attachment_path', 'is', null);
+      if (error) throw new Error(`기존 첨부 조회 실패: ${error.message}`);
+      const paths = new Map((old ?? []).map((o) => [o.locator as string, o.attachment_path as string]));
+      const { data, error: rpcError } = await db.rpc('replace_version_units', {
+        p_version_id: versionId,
+        p_parser_version: PARSER_VERSION,
+        p_units: unitRows(units, (u) => paths.get(u.locator) ?? null),
+      });
+      if (rpcError) throw new Error(`단위 교체 실패: ${rpcError.message}`);
+      return data as number;
     },
   };
 }

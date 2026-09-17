@@ -33,6 +33,12 @@ const schema = z.object({
   OPENAI_API_KEY: optionalKey,
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1536),
+  /** OpenAI 는 모델 버전을 주지 않는다. 모델 동작이 바뀌었다고 판단하면 이 값을 올리고 전체 재임베딩한다 */
+  EMBEDDING_REVISION: z.string().default('2026-09-17'),
+  OPENROUTER_CHAT_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
+  /** 비워 두면 대체 모델을 쓰지 않는다. 인젝션·날조 시험을 통과한 모델만 넣는다 (기획서 §6.4) */
+  OPENROUTER_FALLBACK_MODEL: optionalKey,
+  CRON_SECRET: optionalKey,
 
   /** 화면(frontend 프로젝트)의 오리진. 쉼표로 여러 개. */
   CORS_ALLOWED_ORIGINS: csv,
@@ -109,6 +115,6 @@ export function requireKey(name: KeyName): string {
 
 /** 로그 마스킹에 쓰는 비밀값 목록. 검증 전이라도 process.env 에서 직접 읽는다. */
 export function secretValues(): string[] {
-  const names = ['API_AUTHKEY', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'SUPABASE_SECRET_KEY', 'DIAGNOSTICS_TOKEN'];
+  const names = ['API_AUTHKEY', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'SUPABASE_SECRET_KEY', 'DIAGNOSTICS_TOKEN', 'CRON_SECRET'];
   return names.map((n) => process.env[n]?.trim()).filter((v): v is string => Boolean(v));
 }

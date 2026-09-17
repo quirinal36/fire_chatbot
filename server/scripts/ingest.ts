@@ -35,6 +35,7 @@ const store = dryRun
   ? {
       findVersion: async () => null,
       saveNewVersion: async (i: { units: readonly unknown[] }) => ({ versionId: 'dry-run', unitCount: i.units.length }),
+      replaceUnits: async (_id: string, units: readonly unknown[]) => units.length,
     }
   : supabaseIngestStore(db);
 
@@ -61,6 +62,7 @@ const summary = {
   total: outcomes.length,
   new: outcomes.filter((o) => o.status === 'new').length,
   unchanged: outcomes.filter((o) => o.status === 'unchanged').length,
+  reparsed: outcomes.filter((o) => o.status === 'reparsed').length,
   conflict: outcomes.filter((o) => o.status === 'conflict').length,
   failed: outcomes.filter((o) => o.status === 'failed').length,
   seconds: Math.round((Date.now() - started) / 1000),

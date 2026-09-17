@@ -8,6 +8,13 @@
  */
 import type { RawAppendix, RawArticle, RawDocument } from '../law-api/types';
 
+/**
+ * 정규화 규칙을 바꾸면 올린다. 저장된 버전의 값과 다르면 수집 CLI 가 같은 원문을 다시 정규화한다.
+ * 2: 별표의 "27의2." 가지번호, "비고" 절 분리
+ * 3: 비고 아래 번호를 비고의 하위로(별표7/비고.1)
+ */
+export const PARSER_VERSION = '3';
+
 export type UnitType =
   | 'chapter'
   | 'article'
@@ -53,20 +60,22 @@ function appendixLabel(a: RawAppendix): string {
 const HANGUL = /[가-힣]/u;
 const BOX = /[┌┐└┘├┤┬┴┼│─━┃]/u;
 
-/** 들여쓰기 수준과 번호 기호. 별표 본문의 계층 구분에 쓴다 */
-const MARKERS: ReadonlyArray<[RegExp, number]> = [
-  [/^(\d+)\.\s/u, 1],
-  [/^([가-힣])\.\s/u, 2],
-  [/^(\d+)\)\s/u, 3],
-  [/^([가-힣])\)\s/u, 4],
-  [/^\((\d+)\)\s/u, 5],
+/** 번호 기호의 단계와 locator 에 쓸 표기. 별표 본문의 계층 구분에 쓴다 */
+const MARKERS: ReadonlyArray<[RegExp, number, (m: RegExpExecArray) => string]> = [
+  [/^(비고)(?:\s|$)/u, 0, () => '비고'],
+  [/^(\d+(?:의\d+)?)\.\s/u, 1, (m) => m[1]!],
+  [/^([가-힣])\.\s/u, 2, (m) => m[1]!],
+  [/^(\d+)\)\s/u, 3, (m) => `${m[1]})`],
+  [/^([가-힣])\)\s/u, 4, (m) => `${m[1]})`],
+  [/^\((\d+)\)\s/u, 5, (m) => `(${m[1]})`],
 ];
 
-function markerOf(line: string): { level: number; mark: string } | null {
+function markerOf(line: string): { level: number; token: string } | null {
   const body = line.trimStart();
-  for (const [re, level] of MARKERS) {
+  if (!body) return null;
+  for (const [re, level, token] of MARKERS) {
     const m = re.exec(body);
-    if (m) return { level, mark: m[1]! };
+    if (m) return { level, token: token(m) };
   }
   return null;
 }
@@ -91,34 +100,40 @@ interface Section {
   lines: string[];
 }
 
-/** 별표 본문을 번호 계층으로 나눈다. 번호 없는 머리말은 버리지 않고 별표 단위에 남는다 */
+/**
+ * 별표 본문을 번호 계층으로 나눈다. 번호 없는 머리말은 버리지 않고 별표 단위에 남는다.
+ * "비고" 뒤의 번호는 본문 번호와 겹치므로 비고의 하위로 둔다.
+ */
 export function splitAppendixSections(text: string): Section[] {
   const sections: Section[] = [];
   const stack: string[] = [];
+  let base = 0;
   let current: Section | null = null;
   for (const line of text.split('\n')) {
     const marker = markerOf(line);
-    if (marker) {
-      if (stack.length > marker.level - 1) stack.length = marker.level - 1;
-      // 상위 번호가 비어 있는 경우(예: 가. 로 시작하는 별표)는 빈 칸으로 둔다
-      while (stack.length < marker.level - 1) stack.push('_');
-      stack.push(marker.mark);
-      current = { level: marker.level, path: [...stack], heading: '', lines: [line] };
-      sections.push(current);
-    } else if (current) {
-      current.lines.push(line);
+    if (!marker) {
+      current?.lines.push(line);
+      continue;
     }
+    if (marker.level === 0) {
+      stack.length = 0;
+      stack.push(marker.token);
+      base = 1;
+    } else {
+      const depth = marker.level + base;
+      if (stack.length > depth - 1) stack.length = depth - 1;
+      // 상위 번호가 비어 있는 경우(예: 가. 로 시작하는 별표)는 빈 칸으로 둔다
+      while (stack.length < depth - 1) stack.push('_');
+      stack.push(marker.token);
+    }
+    current = { level: marker.level, path: [...stack], heading: '', lines: [line] };
+    sections.push(current);
   }
   for (const s of sections) s.heading = joinWrapped(s.lines).slice(0, 120);
   return sections;
 }
 
-function sectionLocator(path: string[]): string {
-  // 1.가.1).가) 형태. 숫자 괄호 단계는 ')' 를 붙여 목과 구별한다
-  return path
-    .map((p, i) => (i === 2 || i === 3 ? `${p})` : i === 4 ? `(${p})` : p))
-    .join('.');
-}
+const sectionLocator = (path: string[]) => path.join('.');
 
 /** 기술기준의 1.2.3 절. 부모는 번호의 앞부분이다 */
 function normalizeDecimal(a: RawArticle, ordinal: number, units: NormalizedUnit[], seen: Set<string>, keyByNumber: Map<string, string>) {
@@ -142,14 +157,35 @@ function normalizeDecimal(a: RawArticle, ordinal: number, units: NormalizedUnit[
   });
 }
 
-function normalizeArticle(a: RawArticle, ordinal: number, units: NormalizedUnit[], seen: Set<string>, headingKey: { current: string | null }) {
+interface HeadingState {
+  current: string | null;
+  /** 제2장 · 제2장제1절 */
+  labels: Partial<Record<'편' | '장' | '절' | '관', string>>;
+}
+
+const HEADING_ORDER = ['편', '장', '절', '관'] as const;
+
+/** "제2장 소방시설등의 설치ㆍ관리" → 제2장, 그 아래 "제1절 …" → 제2장제1절 */
+function headingLocator(text: string, state: HeadingState, fallback: string): string {
+  const m = /^제\s*(\d+(?:의\d+)?)\s*(편|장|절|관)/u.exec(text.trim());
+  if (!m) return `편장절:${fallback}`;
+  const level = m[2] as (typeof HEADING_ORDER)[number];
+  const idx = HEADING_ORDER.indexOf(level);
+  state.labels[level] = `제${m[1]}${level}`;
+  for (const lower of HEADING_ORDER.slice(idx + 1)) delete state.labels[lower];
+  return HEADING_ORDER.slice(0, idx + 1)
+    .map((l) => state.labels[l] ?? '')
+    .join('');
+}
+
+function normalizeArticle(a: RawArticle, ordinal: number, units: NormalizedUnit[], seen: Set<string>, headingKey: HeadingState) {
   if (a.isHeading) {
     const key = `h:${a.key}:${ordinal}`;
     units.push({
       key,
       parentKey: null,
       unitType: 'chapter',
-      locator: unique(`편장절:${a.key}`, seen),
+      locator: unique(headingLocator(a.text, headingKey, a.key), seen),
       ordinal,
       heading: a.text.trim(),
       text: a.text.trim(),
@@ -289,7 +325,7 @@ function normalizeAppendix(a: RawAppendix, ordinal: number, units: NormalizedUni
 export function normalizeDocument(doc: RawDocument): NormalizedUnit[] {
   const units: NormalizedUnit[] = [];
   const seen = new Set<string>();
-  const headingKey = { current: null as string | null };
+  const headingKey: HeadingState = { current: null, labels: {} };
 
   const keyByNumber = new Map<string, string>();
   doc.articles.forEach((a, i) =>

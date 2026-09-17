@@ -29,7 +29,7 @@ describe('normalizeDocument · 법령', () => {
     const units = decree();
     const sub = units.find((u) => u.locator === '제2조제1호가목')!;
     const path = contextPath(units, sub);
-    expect(path[0]).toContain('편장절');
+    expect(path[0]).toMatch(/^제1장/);
     expect(path).toContain('제2조(정의)');
     expect(path.at(-1)).toBe('제2조제1호');
   });
@@ -90,7 +90,7 @@ describe('도구', () => {
   });
   it('상위 번호 없이 시작하는 별표도 나눈다', () => {
     const s = splitAppendixSections('머리말\n  가. 첫째\n    1) 하위\n  나. 둘째');
-    expect(s.map((x) => x.path.join('/'))).toEqual(['_/가', '_/가/1', '_/나']);
+    expect(s.map((x) => x.path.join('/'))).toEqual(['_/가', '_/가/1)', '_/나']);
   });
 });
 
@@ -112,5 +112,25 @@ describe('기술기준 이미지', () => {
     const img = units.filter((u) => u.parseNotes === '표·그림이 이미지로만 제공됨');
     expect(img.length).toBeGreaterThan(0);
     for (const u of units) expect(u.text).not.toMatch(/<img/i);
+  });
+});
+
+describe('별표 가지번호와 비고', () => {
+  it('"27의2." 를 독립 항목으로, "비고" 를 별도 절로 나눈다', () => {
+    const units = decree();
+    const locs = new Set(units.map((u) => u.locator));
+    expect(locs).toContain('별표2/27의2');
+    expect(units.find((u) => u.locator === '별표2/27')!.text).not.toContain('터널');
+    expect(locs).toContain('별표4/비고');
+    expect(units.find((u) => u.locator === '별표4/5.바')!.text).not.toMatch(/비고$/);
+  });
+
+  it('비고 아래 번호는 비고의 하위다', () => {
+    const units = decree();
+    const note = units.find((u) => u.locator === '별표7/비고.2')!;
+    expect(note.text).toContain('반올림');
+    expect(note.parentKey).toBe(units.find((u) => u.locator === '별표7/비고')!.key);
+    expect(units.some((u) => u.locator.includes('#'))).toBe(false);
+    expect(units.some((u) => u.locator === '제2장제1절')).toBe(true);
   });
 });
