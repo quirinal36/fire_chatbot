@@ -70,8 +70,10 @@ const bodySchema = z.object({
     }),
     조문내용: z.union([z.string(), z.array(textLike)]).optional(),
     별표: z.object({ 별표단위: z.union([appendix, z.array(appendix)]).optional() }).optional(),
+    // 기술기준(NFTC)은 부칙이 빈 문자열로 온다
     부칙: z
       .object({ 부칙공포일자: parallel.optional(), 부칙공포번호: parallel.optional(), 부칙내용: z.array(textLike).or(z.string()).optional() })
+      .or(z.string().transform(() => undefined))
       .optional(),
     첨부파일: z.object({ 첨부파일링크: parallel.optional(), 첨부파일명: parallel.optional() }).optional(),
   }),
@@ -88,6 +90,7 @@ export function splitAdmrulArticle(raw: string, index: number): RawArticle {
   if (!head) {
     return {
       key: `h${index}`,
+      numbering: 'article',
       number: '',
       title: '',
       isHeading: CHAPTER_HEAD.test(text) || text.length < 40,
@@ -106,6 +109,7 @@ export function splitAdmrulArticle(raw: string, index: number): RawArticle {
       : [];
   return {
     key: `a${index}`,
+    numbering: 'article',
     number: branch ? `${num}의${branch}` : num!,
     title: title ?? '',
     isHeading: false,
@@ -116,10 +120,68 @@ export function splitAdmrulArticle(raw: string, index: number): RawArticle {
   };
 }
 
+const DECIMAL_CANDIDATE = /(\d{1,2}(?:\.\d{1,3}){0,6})(\.?)\s/gu;
+const MAX_GAP = 5;
+
+function isSuccessor(prev: number[], next: number[]): boolean {
+  if (prev.length === 0) return next.length === 1 && next[0] === 1;
+  // 첫 하위 절
+  if (next.length === prev.length + 1 && next.slice(0, -1).every((v, i) => v === prev[i]) && next.at(-1) === 1) return true;
+  // 같은 단계 또는 상위 단계의 다음 절. 삭제된 번호가 있어 몇 칸 건너뛸 수 있다
+  if (next.length > prev.length) return false;
+  const i = next.length - 1;
+  if (!next.slice(0, i).every((v, j) => v === prev[j])) return false;
+  const gap = next[i]! - prev[i]!;
+  return i === 0 ? gap === 1 : gap >= 1 && gap <= MAX_GAP;
+}
+
+/**
+ * 기술기준(NFTC) 본문은 "1. 일반사항1.1 적용범위1.1.1 이 기준은…" 처럼 절 번호가 앞 문장에 붙어 온다.
+ * 번호 순서가 맞는 후보만 경계로 인정해 본문 속 "표 2.1.1.3", "1.5 m" 같은 숫자를 배제한다.
+ */
+export function splitDecimalSections(text: string): RawArticle[] {
+  const bounds: { at: number; bodyAt: number; path: number[] }[] = [];
+  let prev: number[] = [];
+  for (const m of text.matchAll(DECIMAL_CANDIDATE)) {
+    const path = m[1]!.split('.').map(Number);
+    const topLevel = path.length === 1;
+    // 최상위는 "2. 기술기준", 하위는 "2.1 설치기준" 형태만 받는다
+    if (topLevel !== (m[2] === '.')) continue;
+    const before = text.slice(Math.max(0, m.index! - 3), m.index!);
+    // 실제 절 경계는 앞 문장에 붙어 온다("범위1.1.1", "다.1.2"). 공백 뒤 숫자는 본문 속 수치다.
+    if (/[ \t]$/u.test(before) || /\d$/u.test(before)) continue;
+    if (!isSuccessor(prev, path)) continue;
+    bounds.push({ at: m.index!, bodyAt: m.index! + m[0].length, path });
+    prev = path;
+  }
+  return bounds.map((b, i) => {
+    const end = bounds[i + 1]?.at ?? text.length;
+    const body = text.slice(b.bodyAt, end).trim();
+    const hasChild = bounds[i + 1] !== undefined && bounds[i + 1]!.path.length > b.path.length;
+    const isTitle = hasChild && body.length <= 40 && !/[.다]$/u.test(body);
+    return {
+      key: `d${i}`,
+      numbering: 'decimal' as const,
+      number: b.path.join('.'),
+      title: isTitle ? body : '',
+      isHeading: false,
+      text: isTitle ? '' : body,
+      effectiveDate: null,
+      paragraphs: [],
+    };
+  });
+}
+
 /** "간이스프링클러설비의 화재안전성능기준(NFPC 103A)" → "NFPC 103A" */
 export function extractCode(title: string): string | null {
   const m = /\((NF[PT]C\s*[0-9A-Z.\-]+)\)/u.exec(title);
   return m ? m[1]!.replace(/\s+/g, ' ') : null;
+}
+
+/** 기술기준은 "1. 일반사항1.1 …" 으로 시작한다 */
+function isDecimalBody(lines: string[]): boolean {
+  const first = lines.join('\n').trimStart();
+  return /^1\.\s*\S/u.test(first) && /1\.1\s/u.test(first.slice(0, 200));
 }
 
 export function parseAdmrulBody(json: unknown): RawDocument {
@@ -144,7 +206,7 @@ export function parseAdmrulBody(json: unknown): RawDocument {
     effectiveDate: parseYmd(info.시행일자),
     promulgatedAt: parseYmd(info.발령일자),
     isCurrent: info.현행여부 === undefined ? null : info.현행여부 === 'Y',
-    articles: lines.map(splitAdmrulArticle),
+    articles: isDecimalBody(lines) ? splitDecimalSections(lines.join('\n')) : lines.map(splitAdmrulArticle),
     appendices: asArray(svc.별표?.별표단위).map((b) => ({
       key: b.별표키,
       number: b.별표번호,

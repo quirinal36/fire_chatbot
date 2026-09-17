@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fixture, fixtureText } from '@/test/fixtures';
 import { parseEflawBody, parseEflawList } from './adapters/eflaw';
-import { extractCode, parseAdmrulBody, parseAdmrulList, splitAdmrulArticle } from './adapters/admrul';
+import { extractCode, parseAdmrulBody, parseAdmrulList, splitAdmrulArticle, splitDecimalSections } from './adapters/admrul';
 import {
   parseAdmbylList,
   parseInterpretationBody,
@@ -48,9 +48,9 @@ describe('eflaw', () => {
   });
 
   it('본문의 조·항·호·목 형태 차이를 정규화한다', () => {
-    const doc = parseEflawBody(fixture('service-eflaw-body.json'), '287831');
+    const doc = parseEflawBody(fixture('service-eflaw-body.json'), '287375');
     expect(doc.documentId).toBe('009694');
-    expect(doc.versionId).toBe('287831');
+    expect(doc.versionId).toBe('287375');
     expect(doc.effectiveDate).toBe('2026-07-01');
 
     const headings = doc.articles.filter((a) => a.isHeading);
@@ -70,7 +70,7 @@ describe('eflaw', () => {
   });
 
   it('별표번호를 문자열로 보존하고 별표 4 전문을 가져온다', () => {
-    const doc = parseEflawBody(fixture('service-eflaw-body.json'), '287831');
+    const doc = parseEflawBody(fixture('service-eflaw-body.json'), '287375');
     const b4 = doc.appendices.find((b) => b.number === '0004')!;
     expect(b4.title).toContain('소방시설의 종류');
     expect(b4.text.split('\n').length).toBeGreaterThan(400);
@@ -178,5 +178,35 @@ describe('fetch 계층', () => {
 
   it('원본 fixture 에는 OC 자리표시만 있고 실제 키가 없다', () => {
     expect(fixtureText('search-eflaw-list.json')).toContain('OC=<OC>');
+  });
+});
+
+describe('기술기준(NFTC)', () => {
+  it('빈 문자열 부칙과 붙어 있는 절 번호를 처리한다', () => {
+    const doc = parseAdmrulBody(fixture('service-admrul-nftc-body.json'));
+    expect(doc.code).toBe('NFTC 101');
+    expect(doc.addenda).toEqual([]);
+    const numbers = doc.articles.map((a) => a.number);
+    expect(numbers.slice(0, 4)).toEqual(['1', '1.1', '1.1.1', '1.2']);
+    expect(doc.articles.every((a) => a.numbering === 'decimal')).toBe(true);
+    // 본문 속 "표 2.1.1.3 제7호" 는 절 경계가 아니다
+    const s131 = doc.articles.find((a) => a.number === '1.3.1')!;
+    expect(s131.text).toContain('표 2.1.1.3 제7호');
+    // 절 제목과 본문을 구분한다
+    expect(doc.articles.find((a) => a.number === '1.1')!.title).toBe('적용범위');
+    expect(doc.articles.find((a) => a.number === '1.1.1')!.text).toMatch(/^이 기준은/);
+    // 번호는 앞 절보다 항상 뒤다
+    for (let i = 1; i < numbers.length; i++) {
+      const a = numbers[i - 1]!.split('.').map(Number);
+      const b = numbers[i]!.split('.').map(Number);
+      const cmp = (() => { for (let k = 0; k < Math.min(a.length, b.length); k++) if (a[k] !== b[k]) return b[k]! - a[k]!; return b.length - a.length; })();
+      expect(cmp).toBeGreaterThan(0);
+    }
+    expect(numbers).toContain('2.1.1.3');
+  });
+
+  it('번호 건너뜀·참조 번호·숫자 단위를 구별한다', () => {
+    const text = '1. 일반사항1.1 적용1.1.1 가.1.1.2 표 1.3.1 참조 높이 1.5 m 이다.1.1.4 삭제 뒤 번호다.2. 기술기준2.1 설치2.1.1 본문';
+    expect(splitDecimalSections(text).map((a) => a.number)).toEqual(['1', '1.1', '1.1.1', '1.1.2', '1.1.4', '2', '2.1', '2.1.1']);
   });
 });

@@ -12,7 +12,8 @@
     "build": "next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ingest": "tsx scripts/ingest.ts"
   },
   "dependencies": {
     "@next/env": "^16.3.5",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.20.3",
     "@types/react": "^19.3.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   }

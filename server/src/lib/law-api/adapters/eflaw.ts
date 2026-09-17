@@ -122,6 +122,7 @@ export function parseEflawBody(json: unknown, mst: string): RawDocument {
 
   const articles: RawArticle[] = asArray(law.조문?.조문단위).map((a) => ({
     key: a.조문키,
+    numbering: 'article',
     number: a.조문가지번호 && a.조문가지번호 !== '0' ? `${a.조문번호}의${a.조문가지번호}` : a.조문번호,
     title: a.조문제목,
     isHeading: a.조문여부 !== '조문',

@@ -88,6 +88,8 @@ export interface RawParagraph {
 
 export interface RawArticle {
   readonly key: string;
+  /** article: 제N조, decimal: NFTC 의 1.2.3 절 번호 */
+  readonly numbering: 'article' | 'decimal';
   /** 11, 11의2 */
   readonly number: string;
   readonly title: string;
