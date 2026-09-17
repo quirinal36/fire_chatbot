@@ -39,6 +39,12 @@ const schema = z.object({
   /** 비워 두면 대체 모델을 쓰지 않는다. 인젝션·날조 시험을 통과한 모델만 넣는다 (기획서 §6.4) */
   OPENROUTER_FALLBACK_MODEL: optionalKey,
   CRON_SECRET: optionalKey,
+  /** 하루 요청 한도. 익명 세션·로그인 사용자·IP 별 */
+  LIMIT_ANON_PER_DAY: z.coerce.number().int().positive().default(30),
+  LIMIT_USER_PER_DAY: z.coerce.number().int().positive().default(100),
+  LIMIT_IP_PER_DAY: z.coerce.number().int().positive().default(200),
+  /** 하루 모델·임베딩 비용 상한(USD). 넘으면 새 질문을 받지 않는다 */
+  DAILY_BUDGET_USD: z.coerce.number().positive().default(5),
 
   /** 화면(frontend 프로젝트)의 오리진. 쉼표로 여러 개. */
   CORS_ALLOWED_ORIGINS: csv,

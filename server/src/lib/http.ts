@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { EnvError } from './env';
+import { HttpError } from './http-error';
 import { log } from './log';
 
 export interface ApiError {
@@ -20,6 +21,7 @@ export function withErrors<C>(handler: (req: Request, ctx: C) => Promise<Respons
     try {
       return await handler(req, ctx);
     } catch (err) {
+      if (err instanceof HttpError) return jsonError(req, err.status, err.code, err.message);
       if (err instanceof EnvError) {
         log('error', 'server misconfigured', { path: new URL(req.url).pathname, err });
         return jsonError(req, 503, 'misconfigured', '서버 설정이 완료되지 않았습니다.');

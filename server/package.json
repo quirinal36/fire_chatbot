@@ -17,7 +17,8 @@
     "index-corpus": "tsx scripts/index-corpus.ts",
     "publish-corpus": "tsx scripts/publish-corpus.ts",
     "search": "tsx scripts/search.ts",
-    "eval-search": "tsx scripts/eval-search.ts"
+    "eval-search": "tsx scripts/eval-search.ts",
+    "eval-chat": "tsx scripts/eval-chat.ts"
   },
   "dependencies": {
     "@next/env": "^16.3.5",
