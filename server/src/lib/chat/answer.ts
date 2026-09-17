@@ -72,9 +72,45 @@ function evidenceMentions(evidence: readonly Evidence[]): Set<string> {
   return known;
 }
 
+/** 시설 이름의 짧은 표기. 규칙 결과의 facility 와 문장을 대조할 때 쓴다 */
+const FACILITY_KEYWORDS: ReadonlyArray<[RegExp, RegExp]> = [
+  [/간이\s*스프링클러/u, /간이\s*스프링클러/u],
+  [/^스프링클러/u, /(?<!간이\s*)스프링클러/u],
+  [/소화기구/u, /소화기/u],
+  [/옥내소화전/u, /옥내\s*소화전/u],
+  [/비상경보/u, /비상경보/u],
+  [/자동화재탐지/u, /자동화재\s*탐지|자탐/u],
+  [/시각경보/u, /시각경보/u],
+  [/피난기구/u, /피난기구/u],
+  [/유도등/u, /유도등|유도표지/u],
+  [/휴대용/u, /휴대용\s*비상조명/u],
+  [/비상조명등/u, /(?<!휴대용\s*)비상조명/u],
+  [/다중이용업/u, /다중이용업/u],
+];
+const SAYS_APPLICABLE = /(설치해야\s*합니다|설치가\s*필요합니다|설치\s*대상입니다|해당합니다|적용됩니다|갖춰야\s*합니다|의무가\s*있습니다)/u;
+const SAYS_NOT = /(설치하지\s*않아도|대상이\s*아닙니다|해당하지\s*않습니다|적용되지\s*않습니다|의무가\s*없습니다|필요하지\s*않습니다|미치지\s*(?:않|못)|비해당)/u;
+
+/** 규칙 결과와 다른 결론을 말한 문장 */
+export function conflictsWithAssessment(texts: readonly string[], assessment: readonly Assessment[]): string[] {
+  const conflicts: string[] = [];
+  const sentences = texts.flatMap((t) => t.split(/(?<=[.!?다])\s+/u));
+  for (const a of assessment) {
+    const pair = FACILITY_KEYWORDS.find(([f]) => f.test(a.facility));
+    if (!pair) continue;
+    for (const sentence of sentences) {
+      if (!pair[1].test(sentence)) continue;
+      const said = SAYS_NOT.test(sentence) ? 'not_applicable' : SAYS_APPLICABLE.test(sentence) ? 'applicable' : null;
+      // 조건을 달아 말한 문장(…이면, …인 경우)은 결론이 아니다
+      if (said === null || /(이면|라면|경우|이상이면|미만이면|인지|확인)/u.test(sentence)) continue;
+      if (said !== a.status) conflicts.push(`${a.facility}(규칙: ${a.status}, 답변: ${said})`);
+    }
+  }
+  return [...new Set(conflicts)];
+}
+
 export function validateAnswer(
   raw: string,
-  ctx: { refs: ReadonlySet<string>; evidence: readonly Evidence[]; question: string; hasAssessment: boolean },
+  ctx: { refs: ReadonlySet<string>; evidence: readonly Evidence[]; question: string; hasAssessment: boolean; assessment?: readonly Assessment[] },
 ): { ok: true; answer: ChatAnswer } | { ok: false; errors: string[] } {
   let parsed: unknown;
   try {
@@ -83,7 +119,10 @@ export function validateAnswer(
     return { ok: false, errors: ['JSON 이 아니다'] };
   }
   const result = chatAnswerSchema.safeParse(parsed);
-  if (!result.success) return { ok: false, errors: ['스키마 불일치'] };
+  if (!result.success) {
+    const where = [...new Set(result.error.issues.map((i) => `${i.path.join('.')}(${i.code})`))].slice(0, 4);
+    return { ok: false, errors: [`스키마 불일치: ${where.join(', ')}`] };
+  }
   const answer = result.data;
   const errors: string[] = [];
 
@@ -110,6 +149,11 @@ export function validateAnswer(
 
   if (!ctx.hasAssessment && texts.some((t) => VERDICT_PATTERN.test(t))) {
     errors.push('규칙 결과 없이 설치 대상 여부를 단정했다');
+  }
+
+  if (ctx.assessment?.length) {
+    const conflicts = conflictsWithAssessment([answer.summary, ...answer.statements.map((s) => s.text)], ctx.assessment);
+    if (conflicts.length) errors.push(`assessment 와 다른 결론: ${conflicts.join(', ')}. assessment 결과만 옮겨 적으세요`);
   }
 
   return errors.length ? { ok: false, errors } : { ok: true, answer };
@@ -252,6 +296,7 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
         evidence,
         question: opts.question,
         hasAssessment: assessment.length > 0,
+        assessment,
       });
       if (checked.ok) {
         run.errorCode = null;

@@ -9,19 +9,19 @@ export const MAX_STATEMENTS = 8;
 
 export const chatAnswerSchema = z.object({
   mode: z.enum(['legal_search', 'case_guidance']),
-  summary: z.string().min(1).max(600),
+  summary: z.string().min(1).max(1000),
   statements: z
     .array(
       z.object({
-        text: z.string().min(1).max(600),
+        text: z.string().min(1).max(800),
         sourceIds: z.array(z.string()).max(6),
       }),
     )
     .max(MAX_STATEMENTS),
   followUpQuestions: z
-    .array(z.object({ field: z.string().max(40), question: z.string().min(1).max(200) }))
+    .array(z.object({ field: z.string().max(60), question: z.string().min(1).max(300) }))
     .max(4),
-  limitations: z.array(z.string().max(300)).max(4),
+  limitations: z.array(z.string().max(400)).max(4),
 });
 
 export type ChatAnswer = z.infer<typeof chatAnswerSchema>;
@@ -33,7 +33,7 @@ export const CHAT_ANSWER_JSON_SCHEMA = {
   required: ['mode', 'summary', 'statements', 'followUpQuestions', 'limitations'],
   properties: {
     mode: { type: 'string', enum: ['legal_search', 'case_guidance'] },
-    summary: { type: 'string', description: '질문에 대한 2~3문장 요약. 근거가 부족하면 그렇다고 말한다' },
+    summary: { type: 'string', maxLength: 1000, description: '질문에 대한 2~3문장 요약. 근거가 부족하면 그렇다고 말한다' },
     statements: {
       type: 'array',
       maxItems: MAX_STATEMENTS,

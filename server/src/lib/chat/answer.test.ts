@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Evidence, SearchResult } from '../retrieval/search';
-import { generateAnswer, validateAnswer } from './answer';
+import { conflictsWithAssessment, generateAnswer, validateAnswer } from './answer';
 import { ModelError, type ModelResult } from './openrouter';
 import { buildMessages } from './prompt';
 
@@ -157,5 +157,20 @@ describe('근거 문장 누락', () => {
   it('수치를 말하면서 statements 를 비우면 실패', () => {
     const bare = JSON.stringify({ mode: 'legal_search', summary: '연면적 33㎡ 이상이면 대상입니다.', statements: [], followUpQuestions: [], limitations: [] });
     expect(validateAnswer(bare, { refs: new Set(['S1']), evidence: [ev()], question: 'q', hasAssessment: false })).toMatchObject({ ok: false });
+  });
+});
+
+describe('규칙 결과와의 충돌', () => {
+  const a = (facility: string, status: 'applicable' | 'not_applicable' | 'needs_review') => ({
+    facility, status, ruleId: 'x', ruleSetVersion: 'v', explanation: '', missingInputs: [], sourceIds: [],
+  });
+  it('추가 확인인 시설을 단정하면 충돌', () => {
+    expect(conflictsWithAssessment(['근린생활시설 학원은 소화기구를 설치해야 합니다.'], [a('소화기구', 'needs_review')])).toHaveLength(1);
+    expect(conflictsWithAssessment(['수용인원 25명은 기준에 미치지 않아 다중이용업소 의무는 적용되지 않습니다.'], [a('다중이용업소 해당 (안전시설등 설치 의무)', 'needs_review')])).toHaveLength(1);
+  });
+  it('규칙과 같은 결론·조건부 문장은 허용', () => {
+    expect(conflictsWithAssessment(['소화기구를 설치해야 합니다.'], [a('소화기구', 'applicable')])).toEqual([]);
+    expect(conflictsWithAssessment(['연면적이 33㎡ 이상이면 소화기구를 설치해야 합니다.'], [a('소화기구', 'needs_review')])).toEqual([]);
+    expect(conflictsWithAssessment(['간이스프링클러설비는 설치 대상이 아닙니다.'], [a('스프링클러설비', 'applicable'), a('간이스프링클러설비', 'not_applicable')])).toEqual([]);
   });
 });

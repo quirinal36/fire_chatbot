@@ -25,6 +25,8 @@ export interface CaseContext {
   readonly facts: Readonly<Record<string, string>>;
   readonly assessment: readonly Assessment[];
   readonly ruleSetVersion: string | null;
+  /** 규칙 판단에 필요한데 아직 모르는 항목의 질문 */
+  readonly questions?: readonly { field: string; question: string }[];
 }
 
 export interface ChatRequest {
@@ -40,7 +42,7 @@ export interface ChatDeps {
   readonly ip: string;
   readonly emit: (event: ChatEvent) => void;
   /** ISS-019 규칙 실행. 사례가 없으면 null */
-  readonly loadCase?: (db: SupabaseClient, ownerId: string, caseId: string) => Promise<CaseContext>;
+  readonly loadCase?: (db: SupabaseClient, ownerId: string, caseId: string, question?: string, messageId?: string) => Promise<CaseContext>;
   readonly searchFn?: typeof search;
   readonly generateFn?: typeof generateAnswer;
 }
@@ -86,7 +88,8 @@ export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
 
     if (req.caseId) {
       if (!deps.loadCase) throw new HttpError(400, 'invalid_request', '영업장 조건 기능을 사용할 수 없습니다.');
-      caseContext = await deps.loadCase(db, user.id, req.caseId);
+      // 질문에서 조건 후보를 뽑아 사례에 붙인 뒤(확인 전 상태) 규칙을 돌린다
+      caseContext = await deps.loadCase(db, user.id, req.caseId, req.question, messageId);
     }
 
     emit({ type: 'status', phase: 'searching' });
@@ -105,6 +108,18 @@ export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
         ? { caseFacts: caseContext.facts, caseRevision: caseContext.revision, assessment: caseContext.assessment }
         : {}),
     });
+    // 규칙이 요구하는 추가 질문을 앞에 둔다 (현재 규칙에 필요한 항목만)
+    if (result && caseContext?.questions?.length) {
+      const ruleQs = caseContext.questions.slice(0, 3);
+      const rest = result.envelope.answer.followUpQuestions.filter((q) => !ruleQs.some((r) => r.field === q.field));
+      result = {
+        ...result,
+        envelope: {
+          ...result.envelope,
+          answer: { ...result.envelope.answer, followUpQuestions: [...ruleQs, ...rest].slice(0, 4) },
+        },
+      };
+    }
   } catch (err) {
     failure =
       err instanceof HttpError

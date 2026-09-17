@@ -45,6 +45,11 @@ const schema = z.object({
   LIMIT_IP_PER_DAY: z.coerce.number().int().positive().default(200),
   /** 하루 모델·임베딩 비용 상한(USD). 넘으면 새 질문을 받지 않는다 */
   DAILY_BUDGET_USD: z.coerce.number().positive().default(5),
+  /** 승인 전 규칙을 개발·Preview 에서 미리 보여 줄지. 운영(production)에서는 무시한다 */
+  RULES_PREVIEW: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
 
   /** 화면(frontend 프로젝트)의 오리진. 쉼표로 여러 개. */
   CORS_ALLOWED_ORIGINS: csv,
