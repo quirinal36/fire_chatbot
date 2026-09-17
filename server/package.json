@@ -19,7 +19,9 @@
     "search": "tsx scripts/search.ts",
     "eval-search": "tsx scripts/eval-search.ts",
     "eval-chat": "tsx scripts/eval-chat.ts",
-    "rules": "tsx scripts/rules.ts"
+    "rules": "tsx scripts/rules.ts",
+    "admin": "tsx scripts/admin.ts",
+    "jobs": "tsx scripts/jobs.ts"
   },
   "dependencies": {
     "@next/env": "^16.3.5",

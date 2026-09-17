@@ -7,6 +7,7 @@
  *   npm run publish-corpus -- --reviewer ... --evidence ... --only "NFPC 103"
  *
  * 게시는 검색 노출 여부만 정한다. needs_review 단위는 게시되어도 자동 판단 규칙의 근거가 될 수 없다.
+ * 파싱 확인이 필요한 단위가 있는 버전은 --acknowledge-parse-issues 를 줘야 게시된다.
  */
 import './_env';
 
@@ -48,6 +49,7 @@ for (const v of targets) {
     p_version_id: v.id,
     p_reviewer_label: reviewer,
     p_reason: evidence,
+    p_acknowledge_parse_issues: args.includes('--acknowledge-parse-issues'),
   });
   console.log(pubError ? `실패 ${d.title}: ${pubError.message}` : `${status} ${d.title} (${v.source_version_id}, ${v.version_status})`);
 }

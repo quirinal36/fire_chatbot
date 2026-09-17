@@ -114,7 +114,23 @@ export function supabaseIngestStore(db: SupabaseClient): IngestStore {
 
       const { data, error } = await db.rpc('ingest_version', { p: payload });
       if (error) throw new Error(`버전 저장 실패: ${error.message}`);
-      const result = data as { status: string; version_id: string; unit_count?: number };
+      const result = data as { status: string; version_id: string; document_id?: string; unit_count?: number };
+      if (result.status === 'created' && doc.sourceType === 'interpretation' && result.document_id) {
+        // 소방청 해석은 공개 자료다. 출처·선정 여부를 기록한다 (ISS-024)
+        await db.from('source_files').upsert(
+          {
+            document_id: result.document_id,
+            classification: '소방청 법령해석',
+            origin: '국가법령정보 공동활용 API (nfaCgmExpc)',
+            revision_hash: input.contentHash,
+            disclosure: 'public',
+            disclosure_approved_at: new Date().toISOString(),
+            transfer_allowed: true,
+            transfer_approved_at: new Date().toISOString(),
+          },
+          { onConflict: 'document_id,revision_hash', ignoreDuplicates: true },
+        );
+      }
       return { versionId: result.version_id, unitCount: result.unit_count ?? 0 };
     },
 

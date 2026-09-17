@@ -8,6 +8,9 @@ import { env } from './env';
 
 export const MAX_QUESTION_CHARS = 1000;
 
+/** 운영 경보 기준 (ISS-027). 운영 전 담당자와 조정한다 (docs/cost-report.md) */
+export const ALERTS = { budgetShare: 0.8, failureRate: 0.05, insufficientRate: 0.4, p95LatencyMs: 20_000 } as const;
+
 export async function enforceLimits(db: SupabaseClient, user: User, ip: string): Promise<void> {
   const e = env();
   const { data: spent, error } = await db.rpc('spent_today_usd');

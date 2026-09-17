@@ -30,7 +30,7 @@ export interface ChunkReport {
 export async function syncChunks(db: SupabaseClient, log: (s: string) => void = () => {}): Promise<ChunkReport> {
   const { data: versions, error } = await db
     .from('legal_versions')
-    .select('id, review_status, legal_documents!inner(title, source_type)')
+    .select('id, document_id, review_status, legal_documents!inner(title, source_type)')
     .neq('review_status', 'rejected');
   if (error) throw new Error(error.message);
 
@@ -70,6 +70,11 @@ export async function syncChunks(db: SupabaseClient, log: (s: string) => void = 
       const { data, error: rpcError } = await db.rpc('upsert_chunks', { p: chunks.slice(i, i + 500) });
       if (rpcError) throw new Error(`조각 저장 실패: ${rpcError.message}`);
       inserted += data as number;
+    }
+    // 내부 자료는 승인 상태(공개·전송)를 조각에 다시 반영한다
+    if (internal) {
+      const { error: policyError } = await db.rpc('apply_source_policy', { p_document_id: v.document_id });
+      if (policyError) throw new Error(`자료 정책 반영 실패: ${policyError.message}`);
     }
     log(`chunks ${doc.title}: ${chunks.length}`);
   }

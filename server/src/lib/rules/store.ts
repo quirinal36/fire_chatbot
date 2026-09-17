@@ -96,6 +96,8 @@ export interface ActiveRuleSet {
   readonly definition: RuleSetDefinition;
   /** rule key → 근거 unit id */
   readonly sourceUnits: ReadonlyMap<string, readonly string[]>;
+  /** 근거 법령 개정으로 재검토 중인 규칙 (ISS-022) */
+  readonly invalidatedRules: ReadonlySet<string>;
 }
 
 /**
@@ -107,7 +109,7 @@ export async function loadActiveRuleSet(db: SupabaseClient, code: string): Promi
   const allowPreview = e.RULES_PREVIEW && e.appEnv !== 'production';
   const { data: sets, error } = await db
     .from('rule_sets')
-    .select('id, code, version, status, scope, created_at')
+    .select('id, code, version, status, scope, created_at, invalidated_rules')
     .eq('code', code)
     .in('status', allowPreview ? ['published', 'approved', 'pending_review'] : ['published'])
     .order('created_at', { ascending: false });
@@ -150,5 +152,6 @@ export async function loadActiveRuleSet(db: SupabaseClient, code: string): Promi
     preview: chosen.status !== 'published',
     definition,
     sourceUnits,
+    invalidatedRules: new Set((chosen.invalidated_rules as string[] | null) ?? []),
   };
 }

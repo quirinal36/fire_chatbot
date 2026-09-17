@@ -139,16 +139,24 @@ export async function mergeExtracted(
   throw new HttpError(409, 'revision_conflict', '조건을 저장하지 못했습니다. 다시 시도해 주세요.');
 }
 
-function computeAssessment(row: CaseRow, active: ActiveRuleSet | null): CaseAssessment {
+export function computeAssessment(row: CaseRow, active: ActiveRuleSet | null): CaseAssessment {
   const unconfirmed = Object.entries(row.fields)
     .filter(([, f]) => f.state === 'extracted')
     .map(([field, f]) => ({ field, value: f.value ?? null, note: f.note ?? null }));
   if (!active) return { ruleSet: null, results: [], questions: [], unconfirmed };
 
-  const results = runRuleSet(active.definition, toFacts(row.fields)).map((r) => ({
-    ...r,
-    sourceUnitIds: active.sourceUnits.get(r.ruleKey) ?? [],
-  }));
+  const results = runRuleSet(active.definition, toFacts(row.fields)).map((r) =>
+    // 근거 법령이 개정되어 재검토 중인 규칙은 결론을 내지 않는다 (ISS-022)
+    active.invalidatedRules.has(r.ruleKey)
+      ? {
+          ...r,
+          status: 'needs_review' as const,
+          explanation: '근거 법령이 개정되어 담당자가 규칙을 다시 검토하고 있습니다. 관할 소방서에 확인해 주세요.',
+          missingInputs: [],
+          sourceUnitIds: active.sourceUnits.get(r.ruleKey) ?? [],
+        }
+      : { ...r, sourceUnitIds: active.sourceUnits.get(r.ruleKey) ?? [] },
+  );
   // 추출 후보가 있는 항목은 "확인해 주세요" 로 먼저 묻는다
   const missing = results.flatMap((r) => r.missingInputs);
   const pending = new Set(unconfirmed.map((u) => u.field));
