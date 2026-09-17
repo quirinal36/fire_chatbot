@@ -12,3 +12,10 @@ export const FEATURES = {
   /** 도면 탭, 도면 첨부, 도면에서 보기 액션. 1차 출시 제외 */
   planPanel: false,
 } as const;
+
+/**
+ * API 서버 주소. 화면과 API 는 별도 Vercel 프로젝트로 배포한다 (ISS-002).
+ * Vercel 의 frontend 프로젝트 환경변수 `VITE_API_BASE_URL` 로 지정한다.
+ * 빌드 시점에 번들에 들어가므로 비밀값을 넣지 않는다.
+ */
+export const API_BASE_URL: string = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001').replace(/\/+$/, '');
