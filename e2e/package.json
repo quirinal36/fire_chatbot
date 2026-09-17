@@ -1,0 +1,14 @@
+{
+  "name": "fire-chatbot-e2e",
+  "private": true,
+  "type": "module",
+  "description": "브라우저 핵심 흐름 시험 (설치된 Chrome 사용)",
+  "scripts": {
+    "chat": "node chat.mjs",
+    "case": "node case.mjs",
+    "admin": "node admin.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}
