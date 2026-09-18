@@ -47,6 +47,16 @@ export interface ChatDeps {
   readonly generateFn?: typeof generateAnswer;
 }
 
+/**
+ * 되묻기에 답한 글은 "질문 → 답" 목록이라 그대로 검색하면 원래 무엇을 물었는지가 빠진다.
+ * 처음 물었던 질문을 앞에 붙여 검색한다 (ISS-037).
+ */
+export function searchQuery(question: string, history: readonly string[]): string {
+  if (!question.includes('→') || history.length === 0) return question;
+  const first = history[0]!;
+  return first.includes('→') ? question : `${first}\n${question}`;
+}
+
 export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
   const { db, user, emit } = deps;
   const started = Date.now();
@@ -107,7 +117,7 @@ export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
       .reverse();
 
     emit({ type: 'status', phase: 'searching' });
-    searchResult = await (deps.searchFn ?? search)(db, req.question);
+    searchResult = await (deps.searchFn ?? search)(db, searchQuery(req.question, history));
 
     emit({ type: 'status', phase: 'writing' });
     const { data: corpusVersion } = await db.rpc('corpus_version');
