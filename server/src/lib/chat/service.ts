@@ -92,6 +92,20 @@ export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
       caseContext = await deps.loadCase(db, user.id, req.caseId, req.question, messageId);
     }
 
+    // 같은 대화에서 앞서 알려 준 내용. 이미 답한 것을 다시 묻지 않기 위해 본다 (ISS-037)
+    const { data: prior } = await db
+      .from('chat_messages')
+      .select('id, content, created_at')
+      .eq('session_id', req.sessionId)
+      .eq('role', 'user')
+      .neq('id', messageId)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    const history = (prior ?? [])
+      .map((m) => String((m.content as { text?: string }).text ?? '').trim())
+      .filter((t) => t !== '')
+      .reverse();
+
     emit({ type: 'status', phase: 'searching' });
     searchResult = await (deps.searchFn ?? search)(db, req.question);
 
@@ -104,6 +118,7 @@ export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {
       corpusVersion: (corpusVersion as string) ?? 'unknown',
       model: e.OPENROUTER_CHAT_MODEL,
       fallbackModel: e.OPENROUTER_FALLBACK_MODEL,
+      history,
       ...(caseContext
         ? { caseFacts: caseContext.facts, caseRevision: caseContext.revision, assessment: caseContext.assessment }
         : {}),

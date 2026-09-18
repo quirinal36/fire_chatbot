@@ -343,6 +343,14 @@
   gap: var(--space-2);
 }
 
+/* 해석 자료처럼 제목이 긴 근거는 칩 밖으로 넘친다. 한 줄로 줄인다 (ISS-038) */
+.law-card__refs .chip {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chip {
   padding: 5px var(--space-3);
   border-radius: var(--radius-pill);
@@ -952,6 +960,15 @@
 
 .askback__num .askback__text-input {
   flex: 0 1 7rem;
+}
+
+.askback__unit {
+  padding: 5px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  font: var(--text-caption);
+  color: var(--ink);
 }
 
 .askback__send {

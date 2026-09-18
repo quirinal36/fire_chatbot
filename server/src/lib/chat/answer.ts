@@ -27,6 +27,8 @@ export interface GenerateOptions {
   readonly fallbackModel?: string | undefined;
   readonly caseFacts?: Readonly<Record<string, string>>;
   readonly caseRevision?: number | null;
+  /** 같은 대화의 앞선 사용자 발언. 이미 알려 준 것을 다시 묻지 않기 위해 본다 (ISS-037) */
+  readonly history?: readonly string[];
   readonly assessment?: readonly Assessment[];
   readonly call?: typeof callChatModel;
 }
@@ -187,30 +189,92 @@ const MENTIONS: ReadonlyArray<[string, RegExp]> = [
   ['event_date', /\d{4}\s*[.\-년]/u],
 ];
 
-const CLARIFYING: Record<string, { field: string; question: string }> = {
-  facility: { field: 'facility', question: '어떤 소방시설이 궁금하신가요? (소화기, 자동화재탐지설비, 스프링클러, 유도등, 피난기구 등)' },
-  building_use: { field: 'building_use', question: '어떤 업종이고 건물은 어떤 용도인가요? (예: 상가 건물에 있는 학원)' },
-  size: { field: 'size', question: '영업장이 몇 층이고 바닥면적은 몇 ㎡인가요? 건물 전체 연면적도 알면 알려 주세요.' },
-  event_date: { field: 'event_date', question: '신축·용도변경처럼 공사 계획이 있다면 건축허가(신고) 날짜를 알려 주세요.' },
+/**
+ * 되물을 질문. 한 항목에 하나씩만 묻는다 (ISS-037).
+ * 한 문장에 층·면적을 같이 물으면 화면에서 단위를 골라 답할 수 없다.
+ */
+const CLARIFYING: Record<string, readonly { field: string; question: string }[]> = {
+  facility: [{ field: 'facility', question: '어떤 소방시설이 궁금하신가요? (소화기, 자동화재탐지설비, 스프링클러, 유도등, 피난기구 등)' }],
+  building_use: [{ field: 'building_use', question: '어떤 업종이고 건물은 어떤 용도인가요? (예: 상가 건물에 있는 학원)' }],
+  size: [
+    { field: 'business_floor', question: '영업장이 몇 층인가요?' },
+    { field: 'business_area', question: '영업장 바닥면적은 몇 ㎡인가요?' },
+  ],
+  event_date: [{ field: 'event_date', question: '신축·용도변경처럼 공사 계획이 있다면 건축허가(신고) 날짜를 알려 주세요.' }],
 };
 
-/** 무엇이 빠졌는지 보고 되물을 질문을 고른다 (ISS-034) */
-export function clarifyingQuestions(question: string): { field: string; question: string }[] {
-  const missing = MENTIONS.filter(([, re]) => !re.test(question)).map(([key]) => key);
-  // 시설과 업종이 가장 중요하다. 시점은 공사 이야기가 나왔을 때만 묻는다
-  const order = ['facility', 'building_use', 'size'].filter((k) => missing.includes(k));
-  if (/신축|증축|개축|용도\s*변경|허가|착공|완공|리모델링/u.test(question) && missing.includes('event_date')) order.push('event_date');
-  if (order.length) return order.slice(0, 3).map((k) => CLARIFYING[k]!);
-  // 질문에 조건은 다 있는데 근거를 못 찾은 경우. 같은 것을 다시 묻지 않는다
-  return [
-    { field: 'scope', question: '설치 대상인지 여부가 궁금하신가요, 설치 방법·기준이 궁금하신가요?' },
-    { field: 'building_total', question: '건물 전체의 연면적과 층수를 알려 주세요. 소방시설 기준은 대부분 건물 단위로 정해집니다.' },
-  ];
+/**
+ * 되묻는 질문이 무엇을 묻는지 (ISS-037).
+ * 모델이 만든 질문도 가려내야 하므로 문장의 낱말로 판별한다.
+ */
+const TOPIC: ReadonlyArray<[string, RegExp]> = [
+  ['size', /연면적|바닥면적|면적|㎡|제곱|평수|몇\s*평|몇\s*층|층수|수용\s*인원|인원|규모/u],
+  ['event_date', /날짜|허가일|신고일|착공|준공|언제/u],
+  ['building_use', /용도|업종|무슨\s*건물|어떤\s*건물|어떤\s*시설/u],
+  ['facility', /소방시설|설비|소화기|무엇이\s*궁금/u],
+];
+
+export function questionTopic(question: string): string | null {
+  return TOPIC.find(([, re]) => re.test(question))?.[0] ?? null;
 }
 
-function templateAnswer(kind: 'insufficient' | 'fallback', search: SearchResult, question = ''): ChatAnswer {
+/**
+ * 사용자가 이미 알려 준 것은 다시 묻지 않는다 (ISS-037).
+ * said 는 이 대화에서 사용자가 보낸 글만 모은 것이다. 시스템이 물은 문장은 넣지 않는다.
+ */
+export function dropAnswered(
+  questions: readonly { field: string; question: string }[],
+  said: string,
+): { field: string; question: string }[] {
+  const seen = new Set<string>();
+  return questions.filter((q) => {
+    const key = q.question.replace(/\s+/gu, ' ').trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const topic = questionTopic(q.question);
+    const mention = topic === null ? undefined : MENTIONS.find(([k]) => k === topic)?.[1];
+    return mention === undefined || !mention.test(said);
+  });
+}
+
+/** 무엇이 빠졌는지 보고 되물을 질문을 고른다 (ISS-034) */
+export function clarifyingQuestions(question: string, history: readonly string[] = []): { field: string; question: string }[] {
+  // 앞 턴에서 알려 준 것도 "이미 아는 것"이다
+  const said = [...history, question].join('\n');
+  const missing = MENTIONS.filter(([, re]) => !re.test(said)).map(([key]) => key);
+  // 시설과 업종이 가장 중요하다. 시점은 공사 이야기가 나왔을 때만 묻는다
+  const order = ['facility', 'building_use', 'size'].filter((k) => missing.includes(k));
+  if (/신축|증축|개축|용도\s*변경|허가|착공|완공|리모델링/u.test(said) && missing.includes('event_date')) order.push('event_date');
+  if (order.length) return order.flatMap((k) => CLARIFYING[k]!).slice(0, 4);
+  // 조건은 다 알려 줬는데 근거를 못 찾은 경우. 같은 것을 다시 묻지 않는다.
+  // 범위는 아직 안 물었을 때만 한 번 묻고, 그 뒤에는 되묻기를 멈춘다 (ISS-037)
+  if (!/설치\s*대상|설치\s*방법|기준이\s*궁금/u.test(said)) {
+    return [
+      { field: 'scope', question: '설치 대상인지 여부가 궁금하신가요, 설치 방법·기준이 궁금하신가요?' },
+      { field: 'building_total', question: '건물 전체 연면적은 몇 ㎡인가요?' },
+    ];
+  }
+  return [];
+}
+
+function templateAnswer(
+  kind: 'insufficient' | 'fallback',
+  search: SearchResult,
+  question = '',
+  history: readonly string[] = [],
+): ChatAnswer {
   if (kind === 'insufficient') {
-    const questions = clarifyingQuestions(question);
+    const questions = clarifyingQuestions(question, history);
+    // 더 물을 것이 없으면 되묻기를 멈춘다. 계속 물으면 답변을 언제 받을지 알 수 없다 (ISS-037)
+    if (questions.length === 0) {
+      return {
+        mode: 'legal_search',
+        summary: '알려 주신 내용으로도 해당하는 법령 조문을 찾지 못했습니다. 질문을 조금 다르게 적어 주시거나, 관할 소방서에 확인해 주세요.',
+        statements: [],
+        followUpQuestions: [],
+        limitations: ['찾은 근거가 없어 답변을 만들지 못했습니다. 더 여쭐 내용도 없어 되묻기를 멈춥니다.'],
+      };
+    }
     return {
       mode: 'legal_search',
       summary: `아직 답변에 필요한 정보가 부족합니다. 아래 ${questions.length}가지를 알려 주시면 해당하는 법령 조문을 찾아 근거와 함께 안내해 드리겠습니다.`,
@@ -256,10 +320,13 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
   const refs = new Map(search.evidence.map((e, i) => [e.unitId, `S${i + 1}`]));
   const allowed = new Set(evidence.map((e) => refs.get(e.unitId)!));
   const assessment = opts.assessment ?? [];
+  const history = opts.history ?? [];
+  // 이 대화에서 사용자가 보낸 글. 이미 알려 준 것을 다시 묻지 않기 위해 본다 (ISS-037)
+  const said = [...history, opts.question].join('\n');
 
   const envelope = (status: AnswerStatus, answer: ChatAnswer): AnswerEnvelope => ({
     status,
-    answer: dateLimitations(answer, search),
+    answer: dateLimitations({ ...answer, followUpQuestions: dropAnswered(answer.followUpQuestions, said) }, search),
     assessment,
     sources: toSources(search.evidence, refs),
     asOf: search.asOf,
@@ -282,7 +349,10 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
   const record = (status: RunRecord['status']): RunRecord => ({ status, promptVersion: PROMPT_VERSION, ...run });
 
   if (search.status === 'insufficient_evidence' && assessment.length === 0) {
-    return { envelope: envelope('insufficient_evidence', templateAnswer('insufficient', search, opts.question)), run: record('succeeded') };
+    return {
+      envelope: envelope('insufficient_evidence', templateAnswer('insufficient', search, opts.question, history)),
+      run: record('succeeded'),
+    };
   }
 
   const models = [opts.model, ...(opts.fallbackModel && opts.fallbackModel !== opts.model ? [opts.fallbackModel] : [])];
@@ -297,6 +367,7 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
         result = await call(
           buildMessages({
             question: opts.question,
+            history,
             asOf: search.asOf,
             evidence,
             refs,

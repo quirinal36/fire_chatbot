@@ -1,6 +1,6 @@
 import { esc, must } from '../lib/dom';
 import { inline, renderRich } from '../lib/markdown';
-import { answerInput, composeAnswers, questionLabel, type AnswerInput } from '../lib/followup';
+import { answerInput, composeAnswers, formatQuantity, questionLabel, type AnswerInput } from '../lib/followup';
 import { CASE_FIELD_KEYS } from './caseCard';
 import { icons } from '../lib/icons';
 import { FEEDBACK_LABEL, type FeedbackCategory } from '../api/feedback';
@@ -29,6 +29,12 @@ function sourceLabel(e: AnswerEnvelope, ref: string): string {
   return `${s.code ?? s.title.replace(/소방시설 설치 및 관리에 관한 법률/u, '소방시설법').replace(/다중이용업소의 안전관리에 관한 특별법/u, '다중이용업소법')} ${s.locator}`;
 }
 
+/** 해석 자료는 locator 자리에 질의 문장이 통째로 들어와 수백 자가 된다 (ISS-038) */
+function shortLabel(text: string): string {
+  const one = text.replace(/\s+/gu, ' ').trim();
+  return one.length > 40 ? `${one.slice(0, 40)}…` : one;
+}
+
 function renderFeedback(msg: AssistantMessage): string {
   if (!msg.serverId) return '';
   if (msg.feedback === 'sent') return `<p class="feedback__done">신고가 접수되었습니다. 담당자가 확인합니다.</p>`;
@@ -47,6 +53,32 @@ function renderFeedback(msg: AssistantMessage): string {
       <button type="submit" class="btn btn--compact btn--primary" ${msg.feedback === 'sending' ? 'disabled' : ''}>
         ${msg.feedback === 'sending' ? '보내는 중…' : '신고 보내기'}</button>
     </form>`;
+}
+
+/** 몇 개를 답했는지에 따라 버튼 문구를 바꾼다 (ISS-037) */
+const SEND_LABEL = {
+  none: '필요한 정보 답변하기',
+  some: '지금까지 알려 준 내용으로 찾기',
+  all: '알려 준 내용으로 다시 찾기',
+} as const;
+
+/** 한 질문의 답. 고른 보기 > 적은 값 순으로 본다 */
+function rowAnswer(row: HTMLElement): string {
+  const picked = row.querySelector<HTMLElement>('[data-action="pick-answer"][aria-pressed="true"]');
+  if (picked) return picked.dataset['opt'] ?? '';
+  const typed = row.querySelector<HTMLInputElement>('.askback__text-input')?.value.trim() ?? '';
+  if (typed === '') return '';
+  const unit = row.querySelector<HTMLSelectElement>('.askback__unit')?.value;
+  if (unit) return formatQuantity(typed, unit);
+  return `${typed}${row.dataset['unit'] ?? ''}`;
+}
+
+function refreshSendLabel(form: HTMLFormElement): void {
+  const rows = [...form.querySelectorAll<HTMLElement>('.askback__q')];
+  const answered = rows.filter((r) => rowAnswer(r) !== '').length;
+  const button = form.querySelector('button[type="submit"]');
+  if (!button) return;
+  button.textContent = answered === 0 ? SEND_LABEL.none : answered === rows.length ? SEND_LABEL.all : SEND_LABEL.some;
 }
 
 /**
@@ -69,9 +101,14 @@ function renderAnswerField(input: AnswerInput): string {
         </div>
         <input type="text" class="askback__text-input" name="answer" placeholder="직접 입력" autocomplete="off" />`;
     case 'number':
+      // ㎡ 처럼 손으로 적기 어려운 단위는 고르게 한다 (ISS-037)
       return `<span class="askback__num">
         <input type="number" class="askback__text-input" name="answer" step="any" min="0" inputmode="decimal" placeholder="숫자" />
-        <span>${esc(input.unit)}</span>
+        ${
+          input.units
+            ? `<select class="askback__unit" name="unit">${input.units.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('')}</select>`
+            : `<span>${esc(input.unit)}</span>`
+        }
       </span>`;
     case 'date':
       return `<input type="date" class="askback__text-input" name="answer" />`;
@@ -109,7 +146,7 @@ function renderAskBack(msg: AssistantMessage, hasCase: boolean): string {
     }</p>
     ${rows ? `<form class="askback" data-id="${esc(msg.id)}">${rows}
       <div class="askback__send">
-        <button type="submit" class="btn btn--compact btn--primary">알려 준 내용으로 다시 찾기</button>
+        <button type="submit" class="btn btn--compact btn--primary">${esc(SEND_LABEL.none)}</button>
         <span class="askback__hint" role="status"></span>
       </div>
     </form>` : ''}
@@ -172,8 +209,8 @@ function renderAssistant(msg: AssistantMessage, selected: boolean, hasCase: bool
           ${e.sources
             .slice(0, 4)
             .map(
-              (s) => `<button type="button" class="chip" data-action="open-source" data-source="${esc(s.id)}" data-id="${esc(msg.id)}">
-                ${esc(s.ref)} ${esc(sourceLabel(e, s.ref))}</button>`,
+              (s) => `<button type="button" class="chip" data-action="open-source" data-source="${esc(s.id)}" data-id="${esc(msg.id)}"
+                title="${esc(`${s.ref} ${sourceLabel(e, s.ref)}`)}">${esc(s.ref)} ${esc(shortLabel(sourceLabel(e, s.ref)))}</button>`,
             )
             .join('')}
           <button type="button" class="chip chip--quiet" data-action="show-sources" data-id="${esc(msg.id)}"
@@ -273,6 +310,8 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
         el.setAttribute('aria-pressed', picked ? 'false' : 'true');
         const text = el.closest('.askback__q')?.querySelector<HTMLInputElement>('.askback__text-input');
         if (text && !picked) text.value = '';
+        const form = el.closest<HTMLFormElement>('form.askback');
+        if (form) refreshSendLabel(form);
         break;
       }
       case 'open-case':
@@ -287,19 +326,23 @@ export function mountMessageList(root: HTMLElement, actions: AppActions): Compon
     }
   });
 
+  for (const type of ['input', 'change'] as const) {
+    root.addEventListener(type, (event) => {
+      const form = (event.target as Element | null)?.closest<HTMLFormElement>('form.askback');
+      if (form) refreshSendLabel(form);
+    });
+  }
+
   // 되묻는 질문에 답한 내용을 모아 한 번에 보낸다 (ISS-036)
   root.addEventListener('submit', (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.classList.contains('askback')) return;
     event.preventDefault();
     if (busy) return;
-    const pairs = [...form.querySelectorAll<HTMLElement>('.askback__q')].map((row) => {
-      const picked = row.querySelector<HTMLElement>('[data-action="pick-answer"][aria-pressed="true"]');
-      const typed = row.querySelector<HTMLInputElement>('.askback__text-input')?.value.trim() ?? '';
-      const unit = row.dataset['unit'] ?? '';
-      const answer = picked?.dataset['opt'] ?? (typed === '' ? '' : `${typed}${unit}`);
-      return { question: row.dataset['question'] ?? '', answer };
-    });
+    const pairs = [...form.querySelectorAll<HTMLElement>('.askback__q')].map((row) => ({
+      question: row.dataset['question'] ?? '',
+      answer: rowAnswer(row),
+    }));
     const text = composeAnswers(pairs);
     const hint = form.querySelector('.askback__hint');
     if (text === '') {

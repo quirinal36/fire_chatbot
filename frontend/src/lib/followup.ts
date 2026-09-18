@@ -15,7 +15,7 @@
 export type AnswerInput =
   | { readonly kind: 'boolean' }
   | { readonly kind: 'choice'; readonly options: readonly string[] }
-  | { readonly kind: 'number'; readonly unit: string }
+  | { readonly kind: 'number'; readonly unit: string; readonly units?: readonly string[] }
   | { readonly kind: 'date' }
   | { readonly kind: 'text'; readonly placeholder: string };
 
@@ -26,6 +26,24 @@ const UNIT = /몇\s*(㎡|m2|제곱미터|평|층|명|개|곳|년)/gu;
 const DATE = /날짜|허가일|신고일|착공일|준공일|며칠|연월일/u;
 
 const UNIT_LABEL: Record<string, string> = { m2: '㎡', 제곱미터: '㎡' };
+
+/** 면적 단위. 1평 = 3.3058㎡ (한 평은 400/121 제곱미터) */
+export const AREA_UNITS = ['㎡ (제곱미터)', '평'] as const;
+const PYEONG_TO_M2 = 400 / 121;
+
+/**
+ * 고른 단위로 답을 적는다 (ISS-037).
+ * 법령 기준은 ㎡ 이므로 평으로 답하면 환산값을 함께 적는다.
+ */
+export function formatQuantity(value: string, unit: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || value.trim() === '') return '';
+  if (unit === '평') {
+    const m2 = Math.round(n * PYEONG_TO_M2 * 10) / 10;
+    return `${n}평 (약 ${m2}㎡)`;
+  }
+  return `${n}${unit.replace(/\s*\(.*\)$/u, '')}`;
+}
 
 /** "(소화기, 자동화재탐지설비, 스프링클러 등)" 처럼 괄호 안에 나열된 보기 */
 function parenOptions(question: string): string[] {
@@ -81,7 +99,11 @@ export function answerInput(question: string): AnswerInput {
   const units = [...q.matchAll(UNIT)].map((m) => m[1]!);
   const unique = [...new Set(units)];
   // 한 가지 단위만 물으면 숫자 칸으로 받는다. 둘 이상이면 한 줄로 받는다
-  if (unique.length === 1) return { kind: 'number', unit: UNIT_LABEL[unique[0]!] ?? unique[0]! };
+  if (unique.length === 1) {
+    const unit = UNIT_LABEL[unique[0]!] ?? unique[0]!;
+    // ㎡ 는 손으로 입력하기 어렵다. 평으로도 답할 수 있게 고르는 칸을 준다 (ISS-037)
+    return unit === '㎡' ? { kind: 'number', unit, units: AREA_UNITS } : { kind: 'number', unit };
+  }
 
   if (unique.length === 0 && YES_NO.test(q) && !WH.test(q)) return { kind: 'boolean' };
 

@@ -193,11 +193,60 @@ describe('법령 일반 설명과 건물 판정 구분', () => {
 describe('근거 부족 시 되묻기 (ISS-034)', () => {
   it('질문에 없는 정보만 묻는다', async () => {
     const { clarifyingQuestions } = await import('./answer');
-    expect(clarifyingQuestions('소방 기준 알려줘').map((q) => q.field)).toEqual(['facility', 'building_use', 'size']);
+    expect(clarifyingQuestions('소방 기준 알려줘').map((q) => q.field)).toEqual([
+      'facility',
+      'building_use',
+      'business_floor',
+      'business_area',
+    ]);
     // 조건이 다 있는데도 못 찾았으면 같은 것을 다시 묻지 않는다
     expect(clarifyingQuestions('3층 학원인데 소화기 기준 알려줘').map((q) => q.field)).toEqual(['scope', 'building_total']);
-    expect(clarifyingQuestions('학원 소화기').map((q) => q.field)).toEqual(['size']);
+    expect(clarifyingQuestions('학원 소화기').map((q) => q.field)).toEqual(['business_floor', 'business_area']);
     expect(clarifyingQuestions('학원 소화기 112㎡ 3층 신축').map((q) => q.field)).toContain('event_date');
+  });
+
+  it('앞 턴에서 알려 준 것은 다시 묻지 않는다 (ISS-037)', async () => {
+    const { clarifyingQuestions } = await import('./answer');
+    const history = ['어떤 소방시설이 궁금하신가요? → 소화기', '어떤 업종이고 건물은 어떤 용도인가요? → 상가 건물에 있는 학원'];
+    expect(clarifyingQuestions('소방 기준 알려줘', history).map((q) => q.field)).toEqual(['business_floor', 'business_area']);
+    // 층·면적까지 알려 줬으면 범위를 한 번 묻고, 그것도 물었으면 멈춘다
+    const all = [...history, '영업장이 몇 층이고 바닥면적은 몇 ㎡인가요? → 3층, 112㎡'];
+    expect(clarifyingQuestions('다시 찾아줘', all).map((q) => q.field)).toEqual(['scope', 'building_total']);
+    expect(clarifyingQuestions('다시 찾아줘', [...all, '설치 대상인지 여부가 궁금하신가요 → 설치 대상 여부'])).toEqual([]);
+  });
+
+  it('이미 답한 항목을 묻는 질문은 걸러낸다 (ISS-037)', async () => {
+    const { dropAnswered } = await import('./answer');
+    const said = '어떤 업종이고 건물은 어떤 용도인가요? → 상가 건물에 있는 학원\n연면적은? → 112㎡';
+    const kept = dropAnswered(
+      [
+        { field: 'a', question: '건물 전체의 연면적은 몇 ㎡인가요?' },
+        { field: 'b', question: '건물 용도는 무엇인가요?' },
+        { field: 'c', question: '건축허가 날짜를 알려 주세요.' },
+        { field: 'd', question: '건축허가 날짜를 알려 주세요.' },
+      ],
+      said,
+    );
+    expect(kept.map((q) => q.field)).toEqual(['c']);
+  });
+
+  it('더 물을 것이 없으면 되묻기를 멈춘다 (ISS-037)', async () => {
+    const call = vi.fn();
+    const out = await generateAnswer({
+      ...base,
+      question: '다시 찾아줘',
+      history: [
+        '어떤 소방시설이 궁금하신가요? → 소화기',
+        '어떤 업종이고 건물은 어떤 용도인가요? → 상가 건물에 있는 학원',
+        '영업장이 몇 층이고 바닥면적은 몇 ㎡인가요? → 3층, 112㎡',
+        '설치 대상인지 여부가 궁금하신가요 → 설치 대상 여부',
+      ],
+      search: search({ status: 'insufficient_evidence', evidence: [] }),
+      call,
+    });
+    expect(call).not.toHaveBeenCalled();
+    expect(out.envelope.answer.followUpQuestions).toEqual([]);
+    expect(out.envelope.answer.summary).toContain('관할 소방서');
   });
 
   it('근거가 없으면 모델 없이 되묻는 답변을 만든다', async () => {

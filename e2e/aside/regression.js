@@ -5,6 +5,8 @@
  * 1. 추천 질문을 눌러도 답변이 화면에 남는다 (ISS-035)
  * 2. 근거가 부족하면 되묻는 질문이 나오고, 그 자리에서 답을 입력할 수 있다 (ISS-034·036)
  * 3. 근거 원문이 번호 계층·표 서식으로 표시된다 (ISS-033)
+ * 4. 이미 답한 것을 다시 묻지 않는다 (ISS-037)
+ * 5. 근거 칩이 카드 밖으로 넘치지 않는다 (ISS-038)
  *
  * 대화 목록 응답을 일부러 늦추는 경합 시험은 Aside 가 네트워크 가로채기를 지원하지 않아
  * frontend/src/lib/sessions.test.ts 의 단위 시험이 대신한다.
@@ -59,10 +61,10 @@ await page.locator('#composer-input').fill('소방 기준 알려줘');
 await page.locator('#composer-input').press('Enter');
 await page.waitForSelector('.status-note', { timeout: 80000 });
 const note = await page.locator('.status-note').last().innerText();
-// 화면에는 앞선 답변의 양식도 남아 있다. 마지막 답변의 양식만 본다
+// 화면에는 앞선 답변의 양식도 남아 있다. 마지막 메시지의 양식만 본다
 const rows = await page.evaluate(() => {
-  const forms = document.querySelectorAll('.askback');
-  const last = forms[forms.length - 1];
+  const msgs = document.querySelectorAll('.msg--assistant');
+  const last = msgs[msgs.length - 1];
   return Array.from(last ? last.querySelectorAll('.askback__q') : []).map((r) => ({
     q: (r.querySelector('.askback__text').textContent || '').trim(),
     kind: r.dataset.kind,
@@ -75,27 +77,43 @@ check('되묻는 질문마다 답을 입력할 칸이 있다 (ISS-036)', rows.le
 check('실패처럼 보이는 문구를 쓰지 않는다', !note.includes('찾지 못했습니다'), note);
 
 // 답을 채워 보내면 내 질문이 아니라 "질문 → 답" 으로 나간다 (ISS-036)
-// 입력 칸이 있는 질문에는 글을 적고, 고르는 질문이면 첫 보기를 누른다
-const typed = rows.findIndex((r) => r.kind === 'text' || r.kind === 'choice');
-const forms = await page.locator('.askback').all();
-const form = forms[forms.length - 1];
+// 첫 질문에 답한다. 고르는 질문이면 첫 보기를, 적는 질문이면 값을 넣는다
+const form = page.locator('article:last-of-type form.askback');
 const qRows = await form.locator('.askback__q').all();
-let answered = '';
-if (typed >= 0) {
-  answered = '소화기';
-  await qRows[typed].locator('.askback__text-input').fill(answered);
-} else {
-  const opt = await qRows[0].locator('[data-opt]').all();
-  answered = await opt[0].innerText();
-  await opt[0].click();
-}
+const value = rows[0].kind === 'number' ? '3' : '소화기';
+const opts = await qRows[0].locator('[data-opt]').all();
+if (opts.length > 0) await opts[0].click();
+else await qRows[0].locator('.askback__text-input').fill(value);
+const answer = opts.length > 0 ? (await opts[0].innerText()).trim() : value;
 await form.locator('button[type=submit]').click();
-await sleep(1500);
+await sleep(2000);
 const sent = await page.evaluate(() => {
   const u = document.querySelectorAll('.msg--user .bubble');
   return u.length ? (u[u.length - 1].textContent || '').trim() : '';
 });
-check('답한 내용이 질문과 함께 전송된다 (ISS-036)', sent.includes('\u2192 ' + answered.trim()), sent.slice(0, 90));
+check('답한 내용이 질문과 함께 전송된다 (ISS-036)', sent.includes('\u2192 ') && sent.includes(answer), sent.slice(0, 90));
+
+// ISS-037: 방금 답한 질문을 다음 턴에서 다시 묻지 않는다
+const askedAgain = await page.evaluate((q) => {
+  const msgs = document.querySelectorAll('.msg--assistant');
+  const last = msgs[msgs.length - 1];
+  const texts = Array.from(last ? last.querySelectorAll('.askback__text') : []).map((e) => (e.textContent || '').trim());
+  return { texts, repeated: texts.includes(q) };
+}, rows[0].q);
+check('이미 답한 질문을 다시 묻지 않는다 (ISS-037)', !askedAgain.repeated, askedAgain.texts.join(' | ').slice(0, 100));
+await page.screenshot({ path: out + '/4-second-turn.png' });
+
+// ISS-038: 제목이 긴 근거도 칩이 카드를 넘지 않는다
+const chip = await page.evaluate(() => {
+  const c = document.querySelector('.law-card__refs .chip');
+  if (!c) return null;
+  const card = c.closest('.law-card');
+  c.textContent = 'S9 ' + '사용승인일은 1992년 9월 24일, 근린생활시설로 연면적 1,902.578인 대상물로 옥내소화전 설치 대상입니다. '.repeat(3);
+  const cb = c.getBoundingClientRect();
+  const kb = card.getBoundingClientRect();
+  return { inside: cb.right <= kb.right + 1 && cb.bottom <= kb.bottom + 1, height: Math.round(cb.height) };
+});
+check('긴 제목의 근거 칩이 카드를 넘지 않는다 (ISS-038)', chip !== null && chip.inside, JSON.stringify(chip));
 await page.screenshot({ path: out + '/3-clarify.png' });
 
 for (const r of results) console.log((r.ok ? 'PASS  ' : 'FAIL  ') + r.name + (r.detail ? ' — ' + r.detail : ''));

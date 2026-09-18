@@ -7,7 +7,7 @@
 import type { Evidence } from '../retrieval/search';
 import type { Assessment } from './schema';
 
-export const PROMPT_VERSION = 'chat-2026-09-18.4';
+export const PROMPT_VERSION = 'chat-2026-09-18.5';
 
 export const SYSTEM_PROMPT = `당신은 한국 소방시설 법령 안내 도우미입니다. 소상공인이 이해할 수 있는 쉬운 한국어로 답합니다.
 
@@ -23,10 +23,13 @@ export const SYSTEM_PROMPT = `당신은 한국 소방시설 법령 안내 도우
 8. 건물 조건이 주어진 질문이면 mode 는 case_guidance, 일반 법령 질문이면 legal_search 입니다.
 9. summary 에 적은 기준·수치는 모두 statements 에도 한 문장씩 적고 sourceIds 를 답니다. 근거가 있는데 statements 를 비우지 않습니다.
 10. 시행예정 개정은 시스템이 따로 안내하므로 limitations 에 다시 적지 않습니다.
-11. 간결하게 씁니다. summary 는 3문장 이내, statements 는 8개 이하·각 2문장 이내, followUpQuestions·limitations 는 각 4개 이하입니다. 시설별 해당 여부 목록은 화면에 따로 표시되므로 statements 에 전부 나열하지 않고, 해당·추가 확인 항목 중 중요한 것만 근거와 함께 설명합니다.`;
+11. <conversation> 에 사용자가 이미 알려 준 내용은 다시 묻지 않습니다. followUpQuestions 에는 아직 모르는 것만 넣습니다. 더 물을 것이 없으면 followUpQuestions 를 비웁니다.
+12. 간결하게 씁니다. summary 는 3문장 이내, statements 는 8개 이하·각 2문장 이내, followUpQuestions·limitations 는 각 4개 이하입니다. 시설별 해당 여부 목록은 화면에 따로 표시되므로 statements 에 전부 나열하지 않고, 해당·추가 확인 항목 중 중요한 것만 근거와 함께 설명합니다.`;
 
 export interface PromptInput {
   readonly question: string;
+  /** 같은 대화의 앞선 사용자 발언 (ISS-037) */
+  readonly history?: readonly string[];
   readonly asOf: string;
   readonly evidence: readonly Evidence[];
   readonly refs: ReadonlyMap<string, string>;
@@ -38,7 +41,7 @@ export interface PromptInput {
 }
 
 /** 태그를 닫아 버리는 입력을 막는다 */
-const neutralize = (s: string) => s.replace(/<\/?\s*(source|assessment|question|case)\b[^>]*>/giu, '');
+const neutralize = (s: string) => s.replace(/<\/?\s*(source|assessment|question|case|conversation)\b[^>]*>/giu, '');
 
 const MAX_SOURCE_CHARS = 1600;
 
@@ -70,9 +73,15 @@ export function buildMessages(input: PromptInput): { role: 'system' | 'user'; co
     ? `\n시행예정 개정: ${input.pendingChanges.map((p) => `${p.documentTitle} (${p.effectiveDate})`).join(', ')}`
     : '';
 
+  // 앞 턴에서 알려 준 조건을 모델이 알아야 같은 것을 다시 묻지 않는다 (ISS-037)
+  const conversation = input.history?.length
+    ? `<conversation>\n${input.history.slice(-8).map((h) => `사용자: ${neutralize(h).slice(0, 400)}`).join('\n')}\n</conversation>`
+    : '';
+
   const user = `기준일: ${input.asOf}${pending}
 ${facts}
 ${assessment}
+${conversation}
 ${sources || '<source>제공된 근거 없음</source>'}
 <question>
 ${neutralize(input.question)}

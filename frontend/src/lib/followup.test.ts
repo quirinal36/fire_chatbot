@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerInput, composeAnswers, questionLabel } from './followup';
+import { AREA_UNITS, answerInput, composeAnswers, formatQuantity, questionLabel } from './followup';
 
 describe('answerInput', () => {
   it('예·아니오로 답할 질문은 boolean 이다', () => {
@@ -19,7 +19,8 @@ describe('answerInput', () => {
   });
 
   it('한 가지 단위를 물으면 숫자와 단위로 받는다', () => {
-    expect(answerInput('영업장 바닥면적은 몇 ㎡인가요?')).toEqual({ kind: 'number', unit: '㎡' });
+    // ㎡ 는 손으로 적기 어려워 평도 고를 수 있다 (ISS-037)
+    expect(answerInput('영업장 바닥면적은 몇 ㎡인가요?')).toEqual({ kind: 'number', unit: '㎡', units: AREA_UNITS });
     expect(answerInput('수용인원은 몇 명인가요?')).toEqual({ kind: 'number', unit: '명' });
   });
 
@@ -72,5 +73,20 @@ describe('questionLabel', () => {
 
   it('뜻이 담긴 괄호는 남긴다', () => {
     expect(questionLabel('건축허가(또는 용도변경 신고) 날짜를 알려 주세요.')).toBe('건축허가(또는 용도변경 신고) 날짜를 알려 주세요.');
+  });
+});
+
+describe('formatQuantity', () => {
+  it('㎡ 는 그대로 적는다', () => {
+    expect(formatQuantity('112', '㎡ (제곱미터)')).toBe('112㎡');
+  });
+
+  it('평은 ㎡ 로 환산해 함께 적는다', () => {
+    expect(formatQuantity('30', '평')).toBe('30평 (약 99.2㎡)');
+  });
+
+  it('숫자가 아니면 빈 글이다', () => {
+    expect(formatQuantity('', '평')).toBe('');
+    expect(formatQuantity('abc', '㎡ (제곱미터)')).toBe('');
   });
 });
