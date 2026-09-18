@@ -136,7 +136,8 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     disposeGroup(rooms);
     roomList.forEach((room, i) => {
       const hue = ROOM_HUES[i % ROOM_HUES.length] ?? 0;
-      const mat = new T.MeshBasicMaterial({ color: new T.Color(`hsl(${hue}, 70%, 55%)`), transparent: true, opacity: 0.35, depthWrite: false });
+      // 눕힌 면의 법선이 아래를 향하므로 양면으로 그려야 위에서 보인다
+      const mat = new T.MeshBasicMaterial({ color: new T.Color(`hsl(${hue}, 70%, 55%)`), transparent: true, opacity: 0.5, depthWrite: false, side: T.DoubleSide });
       for (const p of room.polygons) {
         const geo = new T.ShapeGeometry(toShape(p));
         geo.rotateX(Math.PI / 2);

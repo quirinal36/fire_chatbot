@@ -1,7 +1,8 @@
 /**
  * 벽 마스크에서 방을 찾아 면적을 잰다.
  *
- *   1. 건물 윤곽: 벽을 크게 닫아(3m) 창·문 틈을 메우고, 바깥에서 닿지 않는 곳을 모두 채운다.
+ *   1. 건물 윤곽: 이미지 밖의 빈 공간에서 벽을 뚫지 않고 다가갈 수 있는 곳이 바깥이다. 벽에서 1.5m
+ *      이내로는 "먼 바깥"에서 1.5m 걸음 안에서만 들어올 수 있어, 3m 보다 좁은 창·문 틈은 못 지난다.
  *   2. 방: 윤곽 안에서 벽을 문 폭만큼(1.3m) 닫아 방 사이 출입구를 막은 뒤, 남은 빈 곳의 덩어리 하나가 방 하나다.
  *   3. 면적 = 픽셀 수 ÷ (1m 당 픽셀 수)². 너무 작은 조각(1㎡ 미만)은 버린다.
  */
@@ -33,24 +34,82 @@ export interface RoomOptions {
   readonly minRoomM2?: number;
 }
 
-/** 이미지 가장자리에서 닿는 빈 픽셀을 바깥으로 표시한다 */
-function outsideOf(mask: Uint8Array, w: number, h: number): Uint8Array {
-  const outside = new Uint8Array(w * h);
-  const stack: number[] = [];
-  const push = (i: number): void => {
-    if (!mask[i] && !outside[i]) { outside[i] = 1; stack.push(i); }
-  };
-  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
-  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
-  while (stack.length) {
-    const i = stack.pop() as number;
-    const x = i % w;
-    if (x > 0) push(i - 1);
-    if (x < w - 1) push(i + 1);
-    if (i >= w) push(i - w);
-    if (i + w < w * h) push(i + w);
+/** 각 픽셀에서 가장 가까운 벽까지의 체비쇼프 거리(8-연결 BFS). 벽은 0 */
+function wallDistance(mask: Uint8Array, w: number, h: number): Int32Array {
+  const dist = new Int32Array(w * h).fill(-1);
+  let queue: number[] = [];
+  for (let i = 0; i < w * h; i++) if (mask[i]) { dist[i] = 0; queue.push(i); }
+  let d = 0;
+  while (queue.length) {
+    const next: number[] = [];
+    d++;
+    for (const i of queue) {
+      const x = i % w;
+      const y = (i - x) / w;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const j = yy * w + xx;
+          if (dist[j] === -1) { dist[j] = d; next.push(j); }
+        }
+      }
+    }
+    queue = next;
   }
-  return outside;
+  return dist;
+}
+
+/**
+ * 건물 바깥을 찾는다. 이미지 밖은 끝없는 빈 공간이라고 본다.
+ * 벽에서 r 이상 떨어진 채로 가장자리에서 닿을 수 있는 곳이 "먼 바깥"이고, 거기서 벽을 뚫지 않고
+ * r 걸음까지 다가간 곳까지가 바깥이다. 폭이 2r 보다 좁은 창·문 틈으로는 거의 들어오지 못한다.
+ * 가장자리 픽셀은 이미지 밖의 먼 바깥에서 (r - 벽까지 거리)만큼 걸어온 것으로 쳐서 남은 걸음을 준다.
+ */
+function outsideRegion(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  const dist = wallDistance(mask, w, h);
+  const reached = new Uint8Array(w * h);
+  const buckets: number[][] = Array.from({ length: r + 1 }, () => []);
+  const seed = (i: number, budget: number): void => {
+    if (mask[i] || reached[i] || budget <= 0) return;
+    reached[i] = 1;
+    buckets[Math.min(r, budget)]?.push(i);
+  };
+  // 가장자리: 벽까지 거리만큼(최대 r) 걸을 수 있다
+  for (let x = 0; x < w; x++) { seed(x, dist[x] ?? 0); seed((h - 1) * w + x, dist[(h - 1) * w + x] ?? 0); }
+  for (let y = 0; y < h; y++) { seed(y * w, dist[y * w] ?? 0); seed(y * w + w - 1, dist[y * w + w - 1] ?? 0); }
+  // 먼 바깥끼리는 걸음을 쓰지 않고 이어진다. 가장자리에서 이어진 먼 바깥은 모두 예산 r
+  const farQueue: number[] = [];
+  for (const i of buckets[r] ?? []) if ((dist[i] ?? 0) >= r) farQueue.push(i);
+  while (farQueue.length) {
+    const i = farQueue.pop() as number;
+    const x = i % w;
+    const y = (i - x) / w;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+      const j = yy * w + xx;
+      if (!reached[j] && (dist[j] ?? 0) >= r) { reached[j] = 1; buckets[r]?.push(j); farQueue.push(j); }
+    }
+  }
+  // 남은 걸음이 많은 곳부터 퍼져 나간다
+  for (let b = r; b >= 1; b--) {
+    for (const i of buckets[b] ?? []) {
+      const x = i % w;
+      const y = (i - x) / w;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const j = yy * w + xx;
+        if (!mask[j] && !reached[j]) { reached[j] = 1; if (b - 1 >= 1) buckets[b - 1]?.push(j); }
+      }
+    }
+  }
+  return reached;
 }
 
 export function findRooms(mask: Uint8Array, w: number, h: number, pxPerMeter: number, opts: RoomOptions = {}): RoomReport {
@@ -60,8 +119,7 @@ export function findRooms(mask: Uint8Array, w: number, h: number, pxPerMeter: nu
   const minPx = (opts.minRoomM2 ?? 1) / m2;
 
   // 1. 건물 윤곽
-  const closed = morphClose(mask, w, h, kOutline);
-  const outside = outsideOf(closed, w, h);
+  const outside = outsideRegion(mask, w, h, kOutline >> 1);
   let footprintPx = 0;
   let floorPx = 0;
   for (let i = 0; i < w * h; i++) {
