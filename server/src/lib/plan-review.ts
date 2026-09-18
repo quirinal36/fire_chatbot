@@ -27,16 +27,40 @@ export const contextSchema = z.object({
 });
 export type ReviewContext = z.infer<typeof contextSchema>;
 
-const pt = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+/**
+ * 응답 검증은 너그럽게 한다. 검토는 참고용 제안이므로, 총평이 400자를 넘었다는 이유로 호출 전체를
+ * 버리면 안 된다. 글은 자르고 수는 범위 안으로 당기고, 목록 한 항목이 깨지면 그 목록만 비운다.
+ * 형식이 아예 다를 때만 실패로 본다.
+ */
+const text = (max: number) => z.string().transform((v) => v.trim().slice(0, max));
+const clamp = (lo: number, hi: number) => z.coerce.number().transform((v) => Math.min(hi, Math.max(lo, v)));
+const pt = z.object({ x: clamp(0, 1), y: clamp(0, 1) });
+const list = <T extends z.ZodType>(item: T, max: number) =>
+  z
+    .array(item)
+    .transform((a) => a.slice(0, max))
+    .catch([] as z.infer<T>[]);
+
 export const reviewSchema = z.object({
-  quality: z.number().min(0).max(1),
-  summary: z.string().max(400),
-  falseWalls: z.array(z.object({ cell: z.string().max(4), what: z.string().max(80) })).max(60),
-  missingWalls: z.array(z.object({ from: pt, to: pt, why: z.string().max(80) })).max(40),
-  openings: z.array(z.object({ id: z.number().int(), kind: z.enum(['door', 'window', 'open']) })).max(80),
-  rooms: z.array(z.object({ id: z.number().int(), name: z.string().max(40) })).max(60),
-  scale: z.object({ pxPerMeter: z.number().positive().nullable(), basis: z.string().max(120) }),
-  params: z.object({ dark: z.number().int().min(0).max(255).nullable(), wallPx: z.number().int().min(1).max(256).nullable() }),
+  // 이 둘은 필수다. 없으면 모델이 그림을 보지 않은 것이므로 실패로 본다
+  quality: clamp(0, 1),
+  summary: text(400),
+  falseWalls: list(z.object({ cell: text(8), what: text(80) }), 60),
+  missingWalls: list(z.object({ from: pt, to: pt, why: text(80) }), 40),
+  openings: list(z.object({ id: z.coerce.number().int(), kind: z.enum(['door', 'window', 'open']) }), 80),
+  rooms: list(z.object({ id: z.coerce.number().int(), name: text(40) }), 60),
+  scale: z
+    .object({ pxPerMeter: z.coerce.number().nullable(), basis: text(120) })
+    // 0 이나 음수는 근거가 없다는 뜻으로 본다
+    .transform((v) => ({ pxPerMeter: v.pxPerMeter !== null && v.pxPerMeter > 0 ? v.pxPerMeter : null, basis: v.basis }))
+    .catch({ pxPerMeter: null, basis: '' }),
+  params: z
+    .object({ dark: z.coerce.number().nullable(), wallPx: z.coerce.number().nullable() })
+    .transform((v) => ({
+      dark: v.dark === null ? null : Math.round(Math.min(255, Math.max(0, v.dark))),
+      wallPx: v.wallPx === null ? null : Math.round(Math.min(256, Math.max(1, v.wallPx))),
+    }))
+    .catch({ dark: null, wallPx: null }),
 });
 export type PlanReview = z.infer<typeof reviewSchema>;
 
@@ -183,7 +207,11 @@ export async function reviewPlan(input: ReviewInput, fetchImpl?: typeof fetch): 
     throw new ModelError('invalid_output', false, '모델 응답이 JSON 이 아니다');
   }
   const parsed = reviewSchema.safeParse(json);
-  if (!parsed.success) throw new ModelError('invalid_output', false, `모델 응답이 스키마와 다르다: ${parsed.error.issues[0]?.path.join('.') ?? ''}`);
+  if (!parsed.success) {
+    const where = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.') || '(본문)'}: ${i.message}`).join('; ');
+    log('warn', 'plan review schema mismatch', { model, where });
+    throw new ModelError('invalid_output', false, `모델 응답이 스키마와 다르다: ${where}`);
+  }
   // 우리가 보낸 번호만 받아들인다
   const openingIds = new Set(input.ctx.openings.map((o) => o.id));
   const roomIds = new Set(input.ctx.rooms.map((r) => r.id));

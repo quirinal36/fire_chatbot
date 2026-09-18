@@ -67,8 +67,32 @@ describe('도면 AI 검토', () => {
     expect(out.usage.costUsd).toBe(0.002);
   });
 
-  it('스키마에 맞지 않는 응답은 invalid_output', async () => {
-    const f = vi.fn().mockResolvedValue(reply({ quality: 2, summary: 'x' }));
-    await expect(reviewPlan({ ctx, image }, f as never)).rejects.toMatchObject({ kind: 'invalid_output' });
+  it('총평과 점수가 없으면 invalid_output', async () => {
+    for (const bad of ['문자열 응답', [], { summary: '점수가 없다' }, { quality: 0.5 }]) {
+      const f = vi.fn().mockResolvedValue(reply(bad));
+      await expect(reviewPlan({ ctx, image }, f as never)).rejects.toMatchObject({ kind: 'invalid_output' });
+    }
+  });
+
+  it('길이·범위를 넘긴 값은 버리지 않고 다듬는다', async () => {
+    const f = vi.fn().mockResolvedValue(
+      reply({
+        ...good,
+        quality: 1.4,
+        summary: '가'.repeat(500),
+        falseWalls: [{ cell: 'D6', what: '책'.repeat(100) }],
+        // 항목 하나가 깨진 목록은 그 목록만 비운다
+        missingWalls: [{ from: { x: 0.1 }, to: { x: 0.4, y: 0.2 }, why: '얇은 벽' }],
+        scale: { pxPerMeter: 0, basis: '근거 없음' },
+        params: { dark: 999, wallPx: 0 },
+      }),
+    );
+    const { review } = await reviewPlan({ ctx, image }, f as never);
+    expect(review.quality).toBe(1);
+    expect(review.summary).toHaveLength(400);
+    expect(review.falseWalls[0]?.what).toHaveLength(80);
+    expect(review.missingWalls).toEqual([]);
+    expect(review.scale.pxPerMeter).toBeNull();
+    expect(review.params).toEqual({ dark: 255, wallPx: 1 });
   });
 });

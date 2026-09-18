@@ -190,6 +190,8 @@ export function createPlanView(actions: AppActions): PlanView {
   let roomNames: Record<number, string> = {};
   let lastOpenings: Opening[] = [];
   let pendingReview: PlanReview | null = null;
+  /** 도면을 새로 올릴 때마다 올라간다. 늦게 도착한 AI 검토 결과를 버리는 데 쓴다 */
+  let planGen = 0;
 
   function say(text: string, tone: 'info' | 'error' = 'info'): void {
     status.textContent = text;
@@ -353,7 +355,7 @@ export function createPlanView(actions: AppActions): PlanView {
       if (m === 'view' || m === 'add' || m === 'erase' || m === 'scale') setMode(m);
     },
     undo: () => popUndo(),
-    default: () => void loadDefault(),
+    default: () => void loadDefault(true),
     'save-open': () => {
       if (!mask) return;
       if (!userId) { actions.openLogin(); return; }
@@ -413,6 +415,11 @@ export function createPlanView(actions: AppActions): PlanView {
     windowRects = [];
     roomNames = {};
     v.setWindows([]);
+    // 마스크가 바뀌었으니 지난 검토 제안과 방 목록은 버린다.
+    // report 를 비워 두면 뒤따르는 AI 검토가 새 방 목록을 즉시 계산한다
+    pendingReview = null;
+    reviewBox.hidden = true;
+    report = null;
     ctl.hidden = false;
     tools.hidden = false;
     saveBtn.disabled = false;
@@ -421,11 +428,13 @@ export function createPlanView(actions: AppActions): PlanView {
     say('벽을 세웠습니다. 끌어서 돌리고 휠로 확대합니다. 벽 추가·지우기·축척은 위 버튼으로 바꿉니다.');
   }
 
-  async function load(file: File): Promise<void> {
+  /** autoReview 면 벽을 세운 뒤 AI 검토를 한 번 자동으로 돌린다 */
+  async function load(file: File, autoReview = false): Promise<void> {
     if (!file.type.startsWith('image/')) {
       say('PNG·JPG·WebP 이미지만 올릴 수 있습니다.', 'error');
       return;
     }
+    planGen++;
     say(`${file.name} 을 분석하는 중…`);
     try {
       const bitmap = await createImageBitmap(file);
@@ -447,6 +456,8 @@ export function createPlanView(actions: AppActions): PlanView {
       currentPlan = null;
       setMode('view');
       await show();
+      // 도면을 먼저 화면에 띄우고, 검토는 그다음에 돌린다. 검토를 기다리며 빈 화면을 보여 주지 않는다
+      if (autoReview) void runReview({ auto: true });
     } catch (err) {
       say(`도면을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
@@ -533,6 +544,7 @@ export function createPlanView(actions: AppActions): PlanView {
 
   async function openSaved(id: string): Promise<void> {
     if (busy) return;
+    planGen++;
     busy = true;
     say('저장한 도면을 불러오는 중…');
     try {
@@ -700,13 +712,20 @@ export function createPlanView(actions: AppActions): PlanView {
     return { canvas: c, scale };
   }
 
-  async function runReview(): Promise<void> {
+  async function runReview(opts: { auto?: boolean } = {}): Promise<void> {
     if (!mask || busy) return;
+    const gen = planGen;
     busy = true;
     reviewBtn.disabled = true;
     try {
       for (let round = 1; round <= REVIEW_MAX_ROUNDS; round++) {
-        say(round === 1 ? 'AI 가 벽 검출 결과를 검토하는 중… (수십 초)' : `AI 제안대로 다시 분석해 ${round}회째 검토하는 중…`);
+        say(
+          round > 1
+            ? `AI 제안대로 다시 분석해 ${round}회째 검토하는 중…`
+            : opts.auto
+              ? '벽을 세웠습니다. 이어서 AI 가 검토하는 중… (수십 초)'
+              : 'AI 가 벽 검출 결과를 검토하는 중… (수십 초)',
+        );
         if (!report) measureRooms();
         lastOpenings = findOpenings(mask, W(), H(), wallPx, pxPerMeter);
         const { canvas, scale } = buildOverlay(lastOpenings);
@@ -721,6 +740,7 @@ export function createPlanView(actions: AppActions): PlanView {
         };
         const image = await toBlob(canvas, 'image/jpeg', 0.85);
         const res = await reviewPlan(image, canvas.width, canvas.height, context);
+        if (gen !== planGen) return; // 검토하는 사이에 다른 도면을 올렸다
         const rv = res.review;
         const retry = round < REVIEW_MAX_ROUNDS && rv.quality < REVIEW_RETRY_BELOW && (rv.params.dark !== null || rv.params.wallPx !== null);
         if (retry) {
@@ -738,10 +758,11 @@ export function createPlanView(actions: AppActions): PlanView {
         break;
       }
     } catch (err) {
-      say(`AI 검토에 실패했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      if (gen === planGen) say(`AI 검토에 실패했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
       busy = false;
-      reviewBtn.disabled = false;
+      // 검토가 끝나면 다시 눌러 볼 수 있게 항상 되살린다
+      reviewBtn.disabled = mask === null;
     }
   }
 
@@ -821,14 +842,18 @@ export function createPlanView(actions: AppActions): PlanView {
   }
 
   let defaultTried = false;
-  async function loadDefault(): Promise<void> {
+  /**
+   * 기본 도면을 올린다. autoReview 는 사용자가 "기본 도면" 을 누른 경우에만 켠다.
+   * 탭을 열 때의 자동 적재까지 검토하면 페이지를 열 때마다 유료 호출과 하루 한도가 소모된다.
+   */
+  async function loadDefault(autoReview = false): Promise<void> {
     defaultTried = true;
     say('기본 도면을 불러오는 중…');
     try {
       const res = await fetch(DEFAULT_PLAN_URL);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
-      await load(new File([blob], 'default.png', { type: blob.type || 'image/png' }));
+      await load(new File([blob], 'default.png', { type: blob.type || 'image/png' }), autoReview);
     } catch (err) {
       say(`기본 도면을 불러오지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
@@ -836,7 +861,7 @@ export function createPlanView(actions: AppActions): PlanView {
 
   input.addEventListener('change', () => {
     const file = input.files?.[0];
-    if (file) void load(file);
+    if (file) void load(file, true);
     input.value = '';
   });
 
@@ -849,7 +874,7 @@ export function createPlanView(actions: AppActions): PlanView {
     e.preventDefault();
     stage.classList.remove('is-over');
     const file = e.dataTransfer?.files[0];
-    if (file) void load(file);
+    if (file) void load(file, true);
   });
 
   heightIn.addEventListener('input', () => {
