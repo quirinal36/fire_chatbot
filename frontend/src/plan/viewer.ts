@@ -1,16 +1,35 @@
 /**
  * 벽 다각형을 Three.js 로 세우는 뷰어. Rhino 의 ExtrudeCrv 처럼 도면 위 벽 윤곽을 높이만큼 끌어올린다.
- * three 는 이 파일에서만 쓰고 동적으로 불러와 채팅 화면 번들에 섞이지 않게 한다.
+ * 편집 모드에서는 바닥 평면에 마우스를 쏘아 도면 픽셀 좌표를 돌려준다. three 는 이 파일에서만 쓰고
+ * 동적으로 불러와 채팅 화면 번들에 섞이지 않게 한다.
  */
 import type * as THREE from 'three';
-import type { WallModel } from './walls';
+import type { Pt, WallPolygon } from './walls';
+import type { Room } from './rooms';
+
+export interface EditHandlers {
+  start(p: Pt): void;
+  move(p: Pt): void;
+  end(p: Pt): void;
+}
 
 export interface Viewer {
-  setModel(model: WallModel, floor: HTMLCanvasElement | null, pxPerMeter: number): void;
+  /** 도면 크기와 축척을 정한다. 바닥 텍스처를 깔고 카메라를 맞춘다 */
+  setModel(width: number, height: number, floor: HTMLCanvasElement | null, pxPerMeter: number): void;
+  setWalls(polygons: WallPolygon[]): void;
+  setRooms(rooms: Room[]): void;
   setHeight(meters: number): void;
   setFloorVisible(visible: boolean): void;
+  /** 드래그 중 미리보기 다각형(픽셀 좌표). null 이면 지운다 */
+  setGuide(polygon: Pt[] | null, tone?: 'add' | 'erase' | 'scale'): void;
+  /** 편집 핸들러를 걸면 왼쪽 드래그가 편집이 되고, null 이면 회전으로 돌아간다 */
+  setEditing(handlers: EditHandlers | null): void;
+  topView(): void;
+  fitView(): void;
   dispose(): void;
 }
+
+const ROOM_HUES = [18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300];
 
 export async function createViewer(container: HTMLElement): Promise<Viewer> {
   const [T, { OrbitControls }] = await Promise.all([
@@ -25,8 +44,9 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
+  const canvas = renderer.domElement;
 
-  const controls = new OrbitControls(camera, renderer.domElement);
+  const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
@@ -39,27 +59,46 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   const wallMat = new T.MeshStandardMaterial({ color: 0xd9d4cc, roughness: 0.85 });
   const edgeMat = new T.LineBasicMaterial({ color: 0x3a3733 });
   const floorMat = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+  const guideMats = {
+    add: new T.MeshStandardMaterial({ color: 0xb5532f, transparent: true, opacity: 0.55 }),
+    erase: new T.MeshStandardMaterial({ color: 0xc0392b, transparent: true, opacity: 0.4 }),
+    scale: new T.MeshStandardMaterial({ color: 0x2f6fb5, transparent: true, opacity: 0.8 }),
+  };
   const walls = new T.Group();
+  const rooms = new T.Group();
   const floor = new T.Mesh(new T.PlaneGeometry(1, 1), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
-  scene.add(walls, floor);
+  let guide: THREE.Mesh | null = null;
+  scene.add(walls, rooms, floor);
 
-  let shapes: THREE.Shape[] = [];
+  let polygons: WallPolygon[] = [];
+  let roomList: Room[] = [];
   let height = 2.7;
-  let extent = 10;
+  let s = 1 / 30; // 픽셀 → 미터
+  let W = 10;
+  let H = 10;
+  let fitCenter = new T.Vector3();
+  let fitRadius = 5;
 
-  function disposeWalls(): void {
-    for (const child of walls.children) {
+  function disposeGroup(group: THREE.Group): void {
+    for (const child of group.children) {
       if (child instanceof T.Mesh || child instanceof T.LineSegments) child.geometry.dispose();
+      if (child instanceof T.Sprite) { child.material.map?.dispose(); child.material.dispose(); }
     }
-    walls.clear();
+    group.clear();
+  }
+
+  function toShape(p: WallPolygon): THREE.Shape {
+    const shape = new T.Shape(p.outer.map(([x, y]) => new T.Vector2(x * s, y * s)));
+    for (const hole of p.holes) shape.holes.push(new T.Path(hole.map(([x, y]) => new T.Vector2(x * s, y * s))));
+    return shape;
   }
 
   function buildWalls(): void {
-    disposeWalls();
-    for (const shape of shapes) {
-      const geo = new T.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    disposeGroup(walls);
+    for (const p of polygons) {
+      const geo = new T.ExtrudeGeometry(toShape(p), { depth: height, bevelEnabled: false });
       // Shape 는 XY 평면에 놓이므로 Y 가 아래로 가는 도면 좌표를 바닥(XZ)으로 눕힌다
       geo.rotateX(Math.PI / 2);
       geo.translate(0, height, 0);
@@ -67,6 +106,71 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       mesh.castShadow = mesh.receiveShadow = true;
       walls.add(mesh, new T.LineSegments(new T.EdgesGeometry(geo, 30), edgeMat));
     }
+  }
+
+  function labelSprite(text: string, hue: number): THREE.Sprite {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 96;
+    const ctx = c.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = `hsla(${hue}, 60%, 30%, 0.85)`;
+      ctx.beginPath();
+      ctx.roundRect(8, 8, 240, 80, 20);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '600 40px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 128, 50);
+    }
+    const tex = new T.CanvasTexture(c);
+    tex.colorSpace = T.SRGBColorSpace;
+    const sprite = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false }));
+    const wide = Math.max(0.8, fitRadius * 0.14);
+    sprite.scale.set(wide, wide * 0.375, 1);
+    return sprite;
+  }
+
+  function buildRooms(): void {
+    disposeGroup(rooms);
+    roomList.forEach((room, i) => {
+      const hue = ROOM_HUES[i % ROOM_HUES.length] ?? 0;
+      const mat = new T.MeshBasicMaterial({ color: new T.Color(`hsl(${hue}, 70%, 55%)`), transparent: true, opacity: 0.35, depthWrite: false });
+      for (const p of room.polygons) {
+        const geo = new T.ShapeGeometry(toShape(p));
+        geo.rotateX(Math.PI / 2);
+        geo.translate(0, 0.01, 0);
+        const mesh = new T.Mesh(geo, mat);
+        rooms.add(mesh);
+      }
+      const label = labelSprite(`${room.id} · ${room.area.toFixed(1)}㎡`, hue);
+      label.position.set(room.center[0] * s, 0.3, room.center[1] * s);
+      rooms.add(label);
+    });
+  }
+
+  function fitCamera(direction: THREE.Vector3): void {
+    // 모델을 감싸는 구가 세로·가로 시야각 중 좁은 쪽에 들어오도록 거리를 잡는다
+    const vFov = (camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const dist = fitRadius / Math.sin(Math.min(vFov, hFov) / 2);
+    controls.target.copy(fitCenter);
+    camera.position.copy(fitCenter).addScaledVector(direction.clone().normalize(), dist);
+    camera.far = dist * 10;
+    camera.updateProjectionMatrix();
+    controls.update();
+  }
+
+  function computeFit(): void {
+    let minX = W, minY = H, maxX = 0, maxY = 0;
+    for (const p of polygons) for (const [x, y] of p.outer) {
+      minX = Math.min(minX, x * s); maxX = Math.max(maxX, x * s);
+      minY = Math.min(minY, y * s); maxY = Math.max(maxY, y * s);
+    }
+    if (minX >= maxX || minY >= maxY) { minX = 0; minY = 0; maxX = W; maxY = H; }
+    fitCenter = new T.Vector3((minX + maxX) / 2, 0, (minY + maxY) / 2);
+    fitRadius = (Math.hypot(maxX - minX, maxY - minY) / 2) * 1.05;
   }
 
   function resize(): void {
@@ -81,6 +185,43 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   observer.observe(container);
   resize();
 
+  // ---- 편집: 마우스 → 바닥 평면 → 픽셀 좌표
+  const raycaster = new T.Raycaster();
+  const plane = new T.Plane(new T.Vector3(0, 1, 0), 0);
+  const hit = new T.Vector3();
+  let handlers: EditHandlers | null = null;
+  let dragging = false;
+
+  function toPlan(event: PointerEvent): Pt | null {
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new T.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    if (!raycaster.ray.intersectPlane(plane, hit)) return null;
+    return [hit.x / s, hit.z / s];
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!handlers || e.button !== 0) return;
+    const p = toPlan(e);
+    if (!p) return;
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    handlers.start(p);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!handlers || !dragging) return;
+    const p = toPlan(e);
+    if (p) handlers.move(p);
+  });
+  const finish = (e: PointerEvent): void => {
+    if (!handlers || !dragging) return;
+    dragging = false;
+    const p = toPlan(e);
+    if (p) handlers.end(p);
+  };
+  canvas.addEventListener('pointerup', finish);
+  canvas.addEventListener('pointercancel', finish);
+
   let running = true;
   const loop = (): void => {
     if (!running) return;
@@ -91,18 +232,10 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   requestAnimationFrame(loop);
 
   return {
-    setModel(model, floorCanvas, pxPerMeter) {
-      const s = 1 / pxPerMeter;
-      const W = model.width * s;
-      const H = model.height * s;
-      extent = Math.max(W, H);
-      shapes = model.polygons.map((p) => {
-        const shape = new T.Shape(p.outer.map(([x, y]) => new T.Vector2(x * s, y * s)));
-        for (const hole of p.holes) shape.holes.push(new T.Path(hole.map(([x, y]) => new T.Vector2(x * s, y * s))));
-        return shape;
-      });
-      buildWalls();
-
+    setModel(width, height_, floorCanvas, pxPerMeter) {
+      s = 1 / pxPerMeter;
+      W = width * s;
+      H = height_ * s;
       floor.geometry.dispose();
       floor.geometry = new T.PlaneGeometry(W, H);
       floor.position.set(W / 2, -0.002, H / 2);
@@ -116,6 +249,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       }
       floorMat.needsUpdate = true;
 
+      const extent = Math.max(W, H);
       sun.position.set(W, extent * 1.5, H * 0.3);
       sun.target.position.set(W / 2, 0, H / 2);
       sun.target.updateMatrixWorld();
@@ -125,23 +259,18 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       cam.far = extent * 5;
       cam.updateProjectionMatrix();
 
-      // 벽이 있는 범위(여백 제외)를 감싸는 구가 세로·가로 시야각 중 좁은 쪽에 들어오도록 거리를 잡는다
-      let minX = W, minY = H, maxX = 0, maxY = 0;
-      for (const p of model.polygons) for (const [x, y] of p.outer) {
-        minX = Math.min(minX, x * s); maxX = Math.max(maxX, x * s);
-        minY = Math.min(minY, y * s); maxY = Math.max(maxY, y * s);
-      }
-      if (minX >= maxX || minY >= maxY) { minX = 0; minY = 0; maxX = W; maxY = H; }
-      const radius = Math.hypot(maxX - minX, maxY - minY) / 2 * 1.05;
-      const vFov = (camera.fov * Math.PI) / 180;
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-      const dist = radius / Math.sin(Math.min(vFov, hFov) / 2);
-      const dir = new T.Vector3(0, 0.8, 1).normalize();
-      controls.target.set((minX + maxX) / 2, 0, (minY + maxY) / 2);
-      camera.position.copy(controls.target).addScaledVector(dir, dist);
-      camera.far = dist * 10;
-      camera.updateProjectionMatrix();
-      controls.update();
+      buildWalls();
+      computeFit();
+      buildRooms();
+      fitCamera(new T.Vector3(0, 0.8, 1));
+    },
+    setWalls(next) {
+      polygons = next;
+      buildWalls();
+    },
+    setRooms(next) {
+      roomList = next;
+      buildRooms();
     },
     setHeight(meters) {
       height = meters;
@@ -150,15 +279,40 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     setFloorVisible(visible) {
       floor.visible = visible;
     },
+    setGuide(polygon, tone = 'add') {
+      if (guide) { guide.geometry.dispose(); scene.remove(guide); guide = null; }
+      if (!polygon || polygon.length < 3) return;
+      const depth = tone === 'add' ? height * 1.01 : tone === 'erase' ? height * 1.05 : 0.05;
+      const geo = new T.ExtrudeGeometry(toShape({ outer: polygon, holes: [] }), { depth, bevelEnabled: false });
+      geo.rotateX(Math.PI / 2);
+      geo.translate(0, depth, 0);
+      guide = new T.Mesh(geo, guideMats[tone]);
+      scene.add(guide);
+    },
+    setEditing(next) {
+      handlers = next;
+      dragging = false;
+      controls.mouseButtons.LEFT = next ? null : T.MOUSE.ROTATE;
+      controls.touches.ONE = next ? null : T.TOUCH.ROTATE;
+      canvas.style.cursor = next ? 'crosshair' : '';
+    },
+    topView() {
+      fitCamera(new T.Vector3(0, 1, 0.0001));
+    },
+    fitView() {
+      fitCamera(new T.Vector3(0, 0.8, 1));
+    },
     dispose() {
       running = false;
       observer.disconnect();
       controls.dispose();
-      disposeWalls();
+      disposeGroup(walls);
+      disposeGroup(rooms);
+      guide?.geometry.dispose();
       floor.geometry.dispose();
       floorMat.map?.dispose();
       renderer.dispose();
-      renderer.domElement.remove();
+      canvas.remove();
     },
   };
 }

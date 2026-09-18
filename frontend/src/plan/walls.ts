@@ -1,5 +1,5 @@
 /**
- * 2D 도면 이미지에서 벽만 골라내는 순수 함수 모음. DOM 에 의존하지 않아 node 에서 시험한다.
+ * 2D 도면 이미지에서 벽만 골라내고, 벽 마스크를 편집하는 순수 함수 모음. DOM 에 의존하지 않아 node 에서 시험한다.
  *
  * 원리
  *   1. 어두운 픽셀을 선으로 본다.
@@ -7,6 +7,8 @@
  *      두꺼운 벽만 남는다. 벽이 끊긴 자리(문·창)는 그대로 빈 채로 남아 출입구가 된다.
  *   3. 남은 픽셀 덩어리의 테두리를 따라 다각형을 만든다. 바깥 테두리와 구멍을 구분해
  *      Three.js Shape 로 바로 압출할 수 있게 넘긴다.
+ *
+ * 편집은 마스크(0/1 픽셀)에 직접 한다. 벽 추가는 칠하기, 지우기는 비우기다. 편집 뒤 3 을 다시 돌린다.
  */
 
 export type Pt = readonly [number, number];
@@ -18,23 +20,19 @@ export interface WallPolygon {
   readonly holes: Pt[][];
 }
 
-export interface WallModel {
-  readonly width: number;
-  readonly height: number;
-  /** 추정하거나 지정한 벽 두께(px) */
-  readonly wallPx: number;
-  readonly polygons: WallPolygon[];
-  /** 벽 마스크. 1 이면 벽. 튜닝 확인용 */
-  readonly mask: Uint8Array;
-}
-
 export interface WallOptions {
   /** 이 값보다 어두운 픽셀을 선으로 본다 (0~255) */
   readonly dark?: number;
   /** 벽 두께(px). 생략하면 이미지에서 추정 */
   readonly wallPx?: number;
-  /** 다각형 단순화 허용 오차(px) */
-  readonly simplify?: number;
+}
+
+export interface Rect {
+  readonly x0: number;
+  readonly y0: number;
+  /** 배타 */
+  readonly x1: number;
+  readonly y1: number;
 }
 
 /** RGBA 픽셀을 0/1 마스크로 바꾼다. 어두우면 1 */
@@ -84,65 +82,77 @@ export function estimateThickness(mask: Uint8Array, w: number, h: number): numbe
   return best;
 }
 
-function erodeOrDilate(mask: Uint8Array, w: number, h: number, k: number, erode: boolean): Uint8Array {
+/** 한 방향 침식/팽창. 누적합으로 창 안의 1 개수를 세서 커널 크기와 무관하게 O(N) */
+function pass1d(mask: Uint8Array, w: number, h: number, k: number, erode: boolean, horizontal: boolean): Uint8Array {
   const r = k >> 1;
-  const tmp = new Uint8Array(w * h);
   const out = new Uint8Array(w * h);
-  const fill = erode ? 1 : 0;
-  // 가로 방향
-  for (let y = 0; y < h; y++) {
-    const row = y * w;
-    for (let x = 0; x < w; x++) {
-      let v = fill;
-      for (let d = -r; d <= r; d++) {
-        const xx = x + d;
-        const px = xx < 0 || xx >= w ? 0 : (mask[row + xx] ?? 0);
-        if (erode ? px === 0 : px === 1) { v = erode ? 0 : 1; break; }
-      }
-      tmp[row + x] = v;
-    }
-  }
-  // 세로 방향
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) {
-      let v = fill;
-      for (let d = -r; d <= r; d++) {
-        const yy = y + d;
-        const px = yy < 0 || yy >= h ? 0 : (tmp[yy * w + x] ?? 0);
-        if (erode ? px === 0 : px === 1) { v = erode ? 0 : 1; break; }
-      }
-      out[y * w + x] = v;
+  const len = horizontal ? w : h;
+  const lines = horizontal ? h : w;
+  const prefix = new Int32Array(len + 1);
+  for (let l = 0; l < lines; l++) {
+    const idx = (i: number): number => (horizontal ? l * w + i : i * w + l);
+    for (let i = 0; i < len; i++) prefix[i + 1] = (prefix[i] ?? 0) + (mask[idx(i)] ?? 0);
+    for (let i = 0; i < len; i++) {
+      const a = Math.max(0, i - r);
+      const b = Math.min(len - 1, i + r);
+      const ones = (prefix[b + 1] ?? 0) - (prefix[a] ?? 0);
+      // 침식은 경계 밖을 0 으로 본다: 창이 잘리면 항상 0
+      out[idx(i)] = erode ? (ones === k && b - a + 1 === k ? 1 : 0) : ones > 0 ? 1 : 0;
     }
   }
   return out;
 }
 
+export function erode(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
+  return pass1d(pass1d(mask, w, h, k, true, true), w, h, k, true, false);
+}
+
+export function dilate(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
+  return pass1d(pass1d(mask, w, h, k, false, true), w, h, k, false, false);
+}
+
 /** 모폴로지 열림. k 보다 얇은 것은 어느 방향으로든 사라진다 */
 export function morphOpen(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
-  return erodeOrDilate(erodeOrDilate(mask, w, h, k, true), w, h, k, false);
+  return dilate(erode(mask, w, h, k), w, h, k);
+}
+
+/** 모폴로지 닫힘. k 보다 좁은 틈이 메워진다 */
+export function morphClose(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
+  return erode(dilate(mask, w, h, k), w, h, k);
+}
+
+/** 4-연결 덩어리에 번호를 매긴다. 0 은 배경. 반환 areas[label] = 픽셀 수 */
+export function labelComponents(mask: Uint8Array, w: number, h: number): { labels: Int32Array; areas: number[] } {
+  const labels = new Int32Array(w * h);
+  const areas: number[] = [0];
+  const stack: number[] = [];
+  for (let start = 0; start < w * h; start++) {
+    if (!mask[start] || labels[start]) continue;
+    const id = areas.length;
+    let area = 0;
+    stack.push(start);
+    labels[start] = id;
+    while (stack.length) {
+      const i = stack.pop() as number;
+      area++;
+      const x = i % w;
+      if (x > 0 && mask[i - 1] && !labels[i - 1]) { labels[i - 1] = id; stack.push(i - 1); }
+      if (x < w - 1 && mask[i + 1] && !labels[i + 1]) { labels[i + 1] = id; stack.push(i + 1); }
+      if (i >= w && mask[i - w] && !labels[i - w]) { labels[i - w] = id; stack.push(i - w); }
+      if (i + w < w * h && mask[i + w] && !labels[i + w]) { labels[i + w] = id; stack.push(i + w); }
+    }
+    areas.push(area);
+  }
+  return { labels, areas };
 }
 
 /** minArea 보다 작은 덩어리를 지운다 (4-연결) */
 export function removeSmall(mask: Uint8Array, w: number, h: number, minArea: number): Uint8Array {
+  const { labels, areas } = labelComponents(mask, w, h);
   const out = mask.slice();
-  const seen = new Uint8Array(w * h);
-  const stack: number[] = [];
-  for (let start = 0; start < w * h; start++) {
-    if (!out[start] || seen[start]) continue;
-    const members: number[] = [];
-    stack.push(start);
-    seen[start] = 1;
-    while (stack.length) {
-      const i = stack.pop() as number;
-      members.push(i);
-      const x = i % w;
-      const y = (i - x) / w;
-      const next = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1];
-      for (const n of next) {
-        if (n >= 0 && out[n] && !seen[n]) { seen[n] = 1; stack.push(n); }
-      }
-    }
-    if (members.length < minArea) for (const i of members) out[i] = 0;
+  for (let i = 0; i < w * h; i++) {
+    const id = labels[i] ?? 0;
+    if (id && (areas[id] ?? 0) < minArea) out[i] = 0;
   }
   return out;
 }
@@ -180,7 +190,6 @@ export function traceLoops(mask: Uint8Array, w: number, h: number): Pt[][] {
       const loop: Pt[] = [];
       let key = startKey;
       let dir = startDirs.pop() as number;
-      // 시작 변은 이미 꺼냈으므로 첫 점을 찍고 걷는다
       for (;;) {
         const x = key % W;
         const y = (key - x) / W;
@@ -300,13 +309,137 @@ export function buildPolygons(loops: readonly Pt[][], eps: number): WallPolygon[
   return outers.map((o) => ({ outer: o.pts, holes: o.holes }));
 }
 
-export function extractWalls(rgba: Uint8ClampedArray, w: number, h: number, opts: WallOptions = {}): WallModel {
-  const dark = opts.dark ?? 110;
-  const binary = binarize(rgba, w, h, dark);
+/** 마스크 → 압출용 다각형 */
+export function polygonsFromMask(mask: Uint8Array, w: number, h: number, eps = 1.5): WallPolygon[] {
+  return buildPolygons(traceLoops(mask, w, h), eps);
+}
+
+/** 이미지 → 벽 마스크. 두께를 지정하지 않으면 추정한다 */
+export function wallMask(rgba: Uint8ClampedArray, w: number, h: number, opts: WallOptions = {}): { mask: Uint8Array; wallPx: number } {
+  const binary = binarize(rgba, w, h, opts.dark ?? 110);
   const wallPx = Math.max(2, opts.wallPx ?? estimateThickness(binary, w, h));
   const k = Math.max(3, Math.round(wallPx * 0.6)) | 1;
-  let mask = morphOpen(binary, w, h, k);
-  mask = removeSmall(mask, w, h, wallPx * wallPx * 4);
-  const polygons = buildPolygons(traceLoops(mask, w, h), opts.simplify ?? 1.5);
-  return { width: w, height: h, wallPx, polygons, mask };
+  const mask = removeSmall(morphOpen(binary, w, h, k), w, h, wallPx * wallPx * 4);
+  return { mask, wallPx };
+}
+
+/* ------------------------------ 편집 ------------------------------ */
+
+function clampRect(r: Rect, w: number, h: number): Rect {
+  return {
+    x0: Math.max(0, Math.min(w, Math.floor(Math.min(r.x0, r.x1)))),
+    y0: Math.max(0, Math.min(h, Math.floor(Math.min(r.y0, r.y1)))),
+    x1: Math.max(0, Math.min(w, Math.ceil(Math.max(r.x0, r.x1)))),
+    y1: Math.max(0, Math.min(h, Math.ceil(Math.max(r.y0, r.y1)))),
+  };
+}
+
+/** 사각형 안을 value 로 채운다. 제자리 수정 */
+export function fillRect(mask: Uint8Array, w: number, h: number, r: Rect, value: 0 | 1): void {
+  const c = clampRect(r, w, h);
+  for (let y = c.y0; y < c.y1; y++) for (let x = c.x0; x < c.x1; x++) mask[y * w + x] = value;
+}
+
+/** 두 점 사이에 두께 thick 인 벽을 칠한다. 축에 가까운 선은 축에 붙인다. 제자리 수정. 칠한 다각형을 돌려준다 */
+export function paintWall(mask: Uint8Array, w: number, h: number, a: Pt, b: Pt, thick: number): Pt[] {
+  const poly = wallOutline(a, b, thick);
+  const xs = poly.map((p) => p[0]);
+  const ys = poly.map((p) => p[1]);
+  const c = clampRect({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }, w, h);
+  for (let y = c.y0; y < c.y1; y++) {
+    for (let x = c.x0; x < c.x1; x++) {
+      if (pointInPolygon([x + 0.5, y + 0.5], poly)) mask[y * w + x] = 1;
+    }
+  }
+  return poly;
+}
+
+/** 축 스냅. 기울기가 axisSnapDeg 안이면 수평·수직으로 맞춘다 */
+export function snapToAxis(a: Pt, b: Pt, axisSnapDeg = 8): Pt {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const ang = (Math.abs(Math.atan2(dy, dx)) * 180) / Math.PI;
+  if (ang < axisSnapDeg || ang > 180 - axisSnapDeg) return [b[0], a[1]];
+  if (Math.abs(ang - 90) < axisSnapDeg) return [a[0], b[1]];
+  return b;
+}
+
+/** 선분 a→b 를 두께 thick 로 감싸는 사각형 4점. 양 끝을 두께 절반만큼 늘려 모서리가 맞물리게 한다 */
+export function wallOutline(a: Pt, b: Pt, thick: number): Pt[] {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const half = thick / 2;
+  const ax = a[0] - ux * half;
+  const ay = a[1] - uy * half;
+  const bx = b[0] + ux * half;
+  const by = b[1] + uy * half;
+  const nx = -uy * half;
+  const ny = ux * half;
+  return [
+    [ax + nx, ay + ny],
+    [bx + nx, by + ny],
+    [bx - nx, by - ny],
+    [ax - nx, ay - ny],
+  ];
+}
+
+/**
+ * 클릭한 자리의 벽 한 구간을 찾는다. 벽의 진행 방향을 따라 걷다가 두께가 갑자기 두꺼워지는
+ * 교차점이나 끝에서 멈춘다. 벽이 아니면 null
+ */
+export function wallSegmentAt(mask: Uint8Array, w: number, h: number, p: Pt, wallPx: number): Rect | null {
+  const x = Math.floor(p[0]);
+  const y = Math.floor(p[1]);
+  if (x < 0 || y < 0 || x >= w || y >= h || !mask[y * w + x]) return null;
+  const at = (xx: number, yy: number): number => (xx < 0 || yy < 0 || xx >= w || yy >= h ? 0 : (mask[yy * w + xx] ?? 0));
+  // 가로·세로 런 길이. 짧은 쪽이 두께
+  const runH = (xx: number, yy: number): [number, number] => {
+    let a = xx;
+    let b = xx;
+    while (at(a - 1, yy)) a--;
+    while (at(b + 1, yy)) b++;
+    return [a, b];
+  };
+  const runV = (xx: number, yy: number): [number, number] => {
+    let a = yy;
+    let b = yy;
+    while (at(xx, a - 1)) a--;
+    while (at(xx, b + 1)) b++;
+    return [a, b];
+  };
+  const [hx0, hx1] = runH(x, y);
+  const [vy0, vy1] = runV(x, y);
+  const horizontal = hx1 - hx0 >= vy1 - vy0; // 가로로 긴 벽
+  const limit = wallPx * 1.6;
+  if (horizontal) {
+    const t = vy1 - vy0 + 1;
+    if (t > limit) return null; // 교차점 한가운데
+    const cy = (vy0 + vy1) >> 1;
+    let a = x;
+    let b = x;
+    const ok = (xx: number): boolean => {
+      if (!at(xx, cy)) return false;
+      const [r0, r1] = runV(xx, cy);
+      return r1 - r0 + 1 <= limit;
+    };
+    while (ok(a - 1)) a--;
+    while (ok(b + 1)) b++;
+    return { x0: a, y0: vy0, x1: b + 1, y1: vy1 + 1 };
+  }
+  const t = hx1 - hx0 + 1;
+  if (t > limit) return null;
+  const cx = (hx0 + hx1) >> 1;
+  let a = y;
+  let b = y;
+  const ok = (yy: number): boolean => {
+    if (!at(cx, yy)) return false;
+    const [r0, r1] = runH(cx, yy);
+    return r1 - r0 + 1 <= limit;
+  };
+  while (ok(a - 1)) a--;
+  while (ok(b + 1)) b++;
+  return { x0: hx0, y0: a, x1: hx1 + 1, y1: b + 1 };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binarize, buildPolygons, estimateThickness, extractWalls, morphOpen, signedArea, simplifyLoop, traceLoops } from './walls';
+import { binarize, buildPolygons, estimateThickness, fillRect, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -104,7 +104,7 @@ describe('simplifyLoop', () => {
   });
 });
 
-describe('extractWalls', () => {
+describe('wallMask', () => {
   it('합성 도면에서 벽만 남기고 가구·글자·문 호는 버린다', () => {
     const w = 300;
     const h = 200;
@@ -115,13 +115,62 @@ describe('extractWalls', () => {
     rect(60, 60, 40, 30, 80); // 가구: 회색 채움이 아니라 테두리만 얇게 그린다고 가정 → 여기선 채움을 지운다
     rect(61, 61, 38, 28, 255);
     for (let x = 200; x < 260; x++) rect(x, 100, 1, 1); // 얇은 선
-    const model = extractWalls(rgba, w, h);
+    const model = wallMask(rgba, w, h);
     expect(model.wallPx).toBe(T);
-    expect(model.polygons).toHaveLength(1);
     const m = model.mask;
     expect(m[22 * w + 100]).toBe(1); // 벽
     expect(m[100 * w + 230]).toBe(0); // 얇은 선
     expect(m[60 * w + 80]).toBe(0); // 가구 테두리
     expect(m[95 * w + 152]).toBe(0); // 출입구
+  });
+});
+
+describe('편집', () => {
+  it('paintWall 은 축에 붙인 두께 있는 벽을 칠한다', () => {
+    const w = 60;
+    const h = 40;
+    const mask = new Uint8Array(w * h);
+    const end = snapToAxis([10, 20], [50, 22]);
+    expect(end).toEqual([50, 20]);
+    paintWall(mask, w, h, [10, 20], end, 6);
+    expect(mask[20 * w + 30]).toBe(1);
+    expect(mask[17 * w + 30]).toBe(1); // 위쪽 가장자리 (20-3)
+    expect(mask[16 * w + 30]).toBe(0);
+    expect(mask[23 * w + 30]).toBe(0);
+    expect(mask[20 * w + 8]).toBe(1); // 끝을 두께 절반만큼 늘림
+    expect(mask[20 * w + 5]).toBe(0);
+  });
+
+  it('snapToAxis 는 기울어진 선은 그대로 둔다', () => {
+    expect(snapToAxis([0, 0], [30, 30])).toEqual([30, 30]);
+  });
+
+  it('wallSegmentAt 은 교차점 사이 한 구간만 찾는다', () => {
+    const w = 100;
+    const h = 60;
+    const mask = new Uint8Array(w * h);
+    fillRect(mask, w, h, { x0: 10, y0: 20, x1: 90, y1: 26 }, 1); // 가로 벽
+    fillRect(mask, w, h, { x0: 47, y0: 5, x1: 53, y1: 55 }, 1); // 세로 벽이 가운데서 교차
+    const seg = wallSegmentAt(mask, w, h, [30, 23], 6);
+    expect(seg).toEqual({ x0: 10, y0: 20, x1: 47, y1: 26 });
+    const vert = wallSegmentAt(mask, w, h, [50, 40], 6);
+    expect(vert).toEqual({ x0: 47, y0: 26, x1: 53, y1: 55 });
+    expect(wallSegmentAt(mask, w, h, [50, 23], 6)).toBeNull(); // 교차점 한가운데
+    expect(wallSegmentAt(mask, w, h, [5, 5], 6)).toBeNull();
+    fillRect(mask, w, h, seg as NonNullable<typeof seg>, 0);
+    expect(mask[23 * w + 30]).toBe(0);
+    expect(mask[23 * w + 70]).toBe(1);
+  });
+
+  it('morphClose 는 좁은 틈을 메운다', () => {
+    const w = 40;
+    const h = 20;
+    const mask = new Uint8Array(w * h);
+    fillRect(mask, w, h, { x0: 2, y0: 8, x1: 18, y1: 12 }, 1);
+    fillRect(mask, w, h, { x0: 22, y0: 8, x1: 38, y1: 12 }, 1);
+    const closed = morphClose(mask, w, h, 7);
+    expect(closed[10 * w + 20]).toBe(1);
+    expect(closed[10 * w + 1]).toBe(0);
+    expect(morphClose(mask, w, h, 3)[10 * w + 20]).toBe(0);
   });
 });

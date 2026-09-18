@@ -1434,3 +1434,94 @@
   font-weight: 400;
   color: var(--ink-muted);
 }
+
+.plan3d__tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.plan3d__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.plan3d__modes .btn[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--surface-base);
+  border-color: var(--ink);
+}
+
+.plan3d__help {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font: var(--text-body-sm);
+  color: var(--ink-muted);
+}
+
+.plan3d__edit,
+.plan3d__scale {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.plan3d__field--num input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--ink);
+  font: var(--text-body-sm);
+}
+
+.plan3d__areas {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.plan3d__total {
+  margin: 0 0 var(--space-2);
+  font: var(--text-body-sm);
+}
+
+.plan3d__sub {
+  font: var(--text-micro);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.plan3d__rooms {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--space-3);
+}
+
+.plan3d__room {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--text-micro);
+  font-weight: 400;
+}
+
+.plan3d__room-area {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan3d__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: hsl(var(--hue) 70% 55%);
+}
