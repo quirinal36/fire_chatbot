@@ -32,7 +32,8 @@ export async function readError(res: Response): Promise<ApiError> {
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   for (const [k, v] of Object.entries(await authHeaders())) headers.set(k, v);
-  if (init.body !== undefined) headers.set('Content-Type', 'application/json');
+  // FormData 는 브라우저가 경계 문자열과 함께 Content-Type 을 붙인다
+  if (init.body !== undefined && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });

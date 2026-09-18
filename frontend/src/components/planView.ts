@@ -4,9 +4,12 @@
  * 캔버스가 유지되어야 하므로 panel 은 이 요소를 innerHTML 로 다시 그리지 않고 붙였다 뗀다.
  */
 import { esc, must, onAction } from '../lib/dom';
+import { createPlan, deletePlan, getPlan, listPlans, updatePlan, type PlanSummary } from '../api/plans';
 import { fillRect, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type RoomReport } from '../plan/rooms';
 import type { EditHandlers, Viewer } from '../plan/viewer';
+import type { AppActions } from '../actions';
+import type { AppState } from '../types';
 
 /** 분석용 이미지 최대 변 길이(px). 더 크면 줄여서 분석한다 */
 const MAX_SIDE = 1600;
@@ -27,12 +30,14 @@ export interface PlanView {
   pick(): void;
   /** 탭이 화면에 보일 때 부른다. 아직 도면이 없으면 기본 도면을 올린다 */
   activate(): void;
+  /** 로그인 상태가 바뀌면 저장 목록을 다시 읽는다 */
+  update(state: AppState): void;
   dispose(): void;
 }
 
 const fmtArea = (m2: number): string => `${m2.toFixed(1)}㎡ (${(m2 / PYEONG).toFixed(1)}평)`;
 
-export function createPlanView(): PlanView {
+export function createPlanView(actions: AppActions): PlanView {
   const el = document.createElement('div');
   el.className = 'plan3d';
   el.innerHTML = `
@@ -42,7 +47,25 @@ export function createPlanView(): PlanView {
         <input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" aria-label="도면 이미지 선택">
       </label>
       <button type="button" class="btn btn--quiet btn--compact" data-action="default">기본 도면</button>
+      <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
       <span class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</span>
+    </div>
+    <form class="plan3d__save" hidden>
+      <label class="plan3d__field plan3d__field--num plan3d__field--grow">
+        <span>도면 이름</span>
+        <input type="text" data-ctl="name" maxlength="80" required placeholder="예: 3층 학원">
+      </label>
+      <button type="submit" class="btn btn--accent btn--compact" data-save="update" hidden>덮어쓰기</button>
+      <button type="submit" class="btn btn--accent btn--compact" data-save="create">새로 저장</button>
+      <button type="button" class="btn btn--quiet btn--compact" data-action="save-close">닫기</button>
+    </form>
+    <div class="plan3d__saved" hidden>
+      <label class="plan3d__field plan3d__field--num plan3d__field--grow">
+        <span>내 도면</span>
+        <select data-ctl="saved"></select>
+      </label>
+      <button type="button" class="btn btn--compact" data-action="load-saved">불러오기</button>
+      <button type="button" class="btn btn--quiet btn--compact" data-action="delete-saved">삭제</button>
     </div>
     <div class="plan3d__tools" hidden>
       <div class="plan3d__modes" role="group" aria-label="편집 모드">
@@ -115,6 +138,12 @@ export function createPlanView(): PlanView {
   const heightOut = must<HTMLOutputElement>('[data-out="height"]', el);
   const thickOut = must<HTMLOutputElement>('[data-out="thick"]', el);
   const undoBtn = must<HTMLButtonElement>('[data-action="undo"]', el);
+  const saveBtn = must<HTMLButtonElement>('[data-action="save-open"]', el);
+  const saveForm = must<HTMLFormElement>('.plan3d__save', el);
+  const nameIn = must<HTMLInputElement>('[data-ctl="name"]', el);
+  const updateBtn = must<HTMLButtonElement>('[data-save="update"]', el);
+  const savedBox = must<HTMLDivElement>('.plan3d__saved', el);
+  const savedSel = must<HTMLSelectElement>('[data-ctl="saved"]', el);
   const modeBtns = Array.from(el.querySelectorAll<HTMLButtonElement>('[data-action="mode"]'));
 
   const HELP: Record<Mode, string> = {
@@ -137,6 +166,11 @@ export function createPlanView(): PlanView {
   let roomsTimer: ReturnType<typeof setTimeout> | null = null;
   let report: RoomReport | null = null;
   let scaleLinePx = 0;
+  /** 계정에 저장된 도면 중 지금 열려 있는 것 */
+  let currentPlan: { id: string; name: string } | null = null;
+  let userId: string | null = null;
+  let saved: PlanSummary[] = [];
+  let busy = false;
 
   function say(text: string, tone: 'info' | 'error' = 'info'): void {
     status.textContent = text;
@@ -301,6 +335,17 @@ export function createPlanView(): PlanView {
     },
     undo: () => popUndo(),
     default: () => void loadDefault(),
+    'save-open': () => {
+      if (!mask) return;
+      if (!userId) { actions.openLogin(); return; }
+      nameIn.value = currentPlan?.name ?? nameIn.value;
+      updateBtn.hidden = currentPlan === null;
+      saveForm.hidden = false;
+      nameIn.focus();
+    },
+    'save-close': () => { saveForm.hidden = true; },
+    'load-saved': () => { if (savedSel.value) void openSaved(savedSel.value); },
+    'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
     top: () => viewer?.topView(),
     fit: () => viewer?.fitView(),
   });
@@ -343,6 +388,7 @@ export function createPlanView(): PlanView {
     v.setModel(W(), H(), source, pxPerMeter);
     ctl.hidden = false;
     tools.hidden = false;
+    saveBtn.disabled = false;
     scheduleRooms();
     say('벽을 세웠습니다. 끌어서 돌리고 휠로 확대합니다. 벽 추가·지우기·축척은 위 버튼으로 바꿉니다.');
   }
@@ -369,12 +415,161 @@ export function createPlanView(): PlanView {
       pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
       userThick = null;
       scaleFixed = false;
+      currentPlan = null;
       setMode('view');
       await show();
     } catch (err) {
       say(`도면을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
   }
+
+  // ---- 계정에 저장
+  function maskPng(): Promise<Blob> {
+    const c = document.createElement('canvas');
+    c.width = W();
+    c.height = H();
+    const ctx = c.getContext('2d');
+    if (!ctx || !mask) return Promise.reject(new Error('마스크가 없습니다'));
+    const img = ctx.createImageData(c.width, c.height);
+    for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
+      const v = mask[i] ? 0 : 255; // 벽은 검정
+      img.data[p] = img.data[p + 1] = img.data[p + 2] = v;
+      img.data[p + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return toBlob(c, 'image/png');
+  }
+
+  function toBlob(c: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+    return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('이미지를 만들지 못했습니다'))), type, quality));
+  }
+
+  async function payload(name: string) {
+    if (!source || !mask) throw new Error('저장할 도면이 없습니다');
+    const [image, maskBlob] = await Promise.all([toBlob(source, 'image/jpeg', 0.85), maskPng()]);
+    return { name, width: W(), height: H(), wallPx, pxPerMeter, scaleFixed, wallHeightM: Number(heightIn.value), image, mask: maskBlob };
+  }
+
+  async function save(mode: 'create' | 'update'): Promise<void> {
+    const name = nameIn.value.trim();
+    if (!name || busy) return;
+    busy = true;
+    say('저장하는 중…');
+    try {
+      const body = await payload(name);
+      const detail = mode === 'update' && currentPlan ? await updatePlan(currentPlan.id, body) : await createPlan(body);
+      currentPlan = { id: detail.id, name: detail.name };
+      saveForm.hidden = true;
+      await refreshSaved();
+      savedSel.value = detail.id;
+      say(`"${detail.name}" 으로 저장했습니다.`);
+    } catch (err) {
+      say(`저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function refreshSaved(): Promise<void> {
+    if (!userId) { saved = []; renderSaved(); return; }
+    try {
+      saved = await listPlans();
+    } catch {
+      saved = [];
+    }
+    renderSaved();
+  }
+
+  function renderSaved(): void {
+    savedBox.hidden = saved.length === 0;
+    const keep = savedSel.value;
+    savedSel.innerHTML = saved
+      .map((p) => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.updatedAt.slice(0, 10))}</option>`)
+      .join('');
+    if (saved.some((p) => p.id === keep)) savedSel.value = keep;
+  }
+
+  async function loadImage(url: string): Promise<HTMLCanvasElement> {
+    const blob = await (await fetch(url)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const c = document.createElement('canvas');
+    c.width = bitmap.width;
+    c.height = bitmap.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('캔버스를 만들 수 없습니다');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return c;
+  }
+
+  async function openSaved(id: string): Promise<void> {
+    if (busy) return;
+    busy = true;
+    say('저장한 도면을 불러오는 중…');
+    try {
+      const d = await getPlan(id);
+      const [img, mk] = await Promise.all([loadImage(d.imageUrl), loadImage(d.maskUrl)]);
+      if (mk.width !== d.width || mk.height !== d.height) throw new Error('저장된 도면 크기가 맞지 않습니다');
+      const ctx = img.getContext('2d', { willReadFrequently: true });
+      const mctx = mk.getContext('2d', { willReadFrequently: true });
+      if (!ctx || !mctx) throw new Error('캔버스를 만들 수 없습니다');
+      source = img;
+      pixels = ctx.getImageData(0, 0, img.width, img.height);
+      const md = mctx.getImageData(0, 0, mk.width, mk.height).data;
+      const next = new Uint8Array(mk.width * mk.height);
+      for (let i = 0, p = 0; i < next.length; i++, p += 4) next[i] = (md[p] ?? 255) < 128 ? 1 : 0;
+      mask = next;
+      wallPx = d.wallPx;
+      userThick = d.wallPx;
+      pxPerMeter = d.pxPerMeter;
+      scaleFixed = d.scaleFixed;
+      heightIn.value = String(d.wallHeightM);
+      heightOut.value = heightIn.value;
+      thickIn.value = String(Math.min(40, wallPx));
+      thickOut.value = String(wallPx);
+      undo.length = 0;
+      undoBtn.disabled = true;
+      currentPlan = { id: d.id, name: d.name };
+      defaultTried = true;
+      setMode('view');
+      const v = await ensureViewer();
+      v.setHeight(d.wallHeightM);
+      v.setWalls(polygonsFromMask(mask, W(), H()));
+      v.setModel(W(), H(), source, pxPerMeter);
+      ctl.hidden = false;
+      tools.hidden = false;
+      saveBtn.disabled = false;
+      scheduleRooms();
+      say(`"${d.name}" 을 불러왔습니다.`);
+    } catch (err) {
+      say(`불러오지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function removeSaved(id: string): Promise<void> {
+    const target = saved.find((p) => p.id === id);
+    if (!target || busy) return;
+    if (!window.confirm(`"${target.name}" 도면을 지울까요? 되돌릴 수 없습니다.`)) return;
+    busy = true;
+    try {
+      await deletePlan(id);
+      if (currentPlan?.id === id) currentPlan = null;
+      await refreshSaved();
+      say(`"${target.name}" 을 지웠습니다.`);
+    } catch (err) {
+      say(`지우지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  saveForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const submitter = (e as SubmitEvent).submitter;
+    void save(submitter instanceof HTMLButtonElement && submitter.dataset['save'] === 'update' ? 'update' : 'create');
+  });
 
   let defaultTried = false;
   async function loadDefault(): Promise<void> {
@@ -433,6 +628,13 @@ export function createPlanView(): PlanView {
     pick: onPick,
     activate() {
       if (!defaultTried && !pixels) void loadDefault();
+    },
+    update(state) {
+      const next = state.user?.id ?? null;
+      if (next === userId) return;
+      userId = next;
+      currentPlan = null;
+      void refreshSaved();
     },
     dispose() {
       document.removeEventListener(PLAN_PICK_EVENT, onPick);

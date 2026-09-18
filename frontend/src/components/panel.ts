@@ -165,7 +165,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
   let latest: import('../types').CaseView | undefined;
 
   // 도면 탭은 캔버스를 유지해야 하므로 HTML 문자열이 아니라 요소를 그대로 붙인다
-  const planView = FEATURES.planPanel ? createPlanView() : null;
+  const planView = FEATURES.planPanel ? createPlanView(actions) : null;
 
   let lastHtml = '';
   let lastTab: PanelTab | null = null;
@@ -174,6 +174,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
     update(state) {
       root.hidden = !state.panelOpen;
       root.style.setProperty('--panel-width', `${state.panelWidth}px`);
+      planView?.update(state);
       if (!state.panelOpen) return;
 
       // 꺼진 탭이 요청되면 법령으로 떨어뜨린다. 빈 패널이 열리지 않게 한다.

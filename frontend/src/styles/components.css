@@ -1525,3 +1525,25 @@
   border-radius: 2px;
   background: hsl(var(--hue) 70% 55%);
 }
+
+.plan3d__save,
+.plan3d__saved {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.plan3d__field--grow {
+  flex: 1 1 auto;
+}
+
+.plan3d__field--num select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--ink);
+  font: var(--text-body-sm);
+}
