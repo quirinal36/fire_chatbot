@@ -16,6 +16,8 @@ const UNDO_LIMIT = 20;
 const PYEONG = 3.3058;
 /** 도면 첨부 버튼이 파일 고르기를 요청할 때 쓰는 이벤트 이름 */
 export const PLAN_PICK_EVENT = 'plan:pick';
+/** 도면 탭을 처음 열면 자동으로 올리는 기본 도면. frontend/public/plans/ 에 둔다 */
+const DEFAULT_PLAN_URL = '/plans/default.png';
 
 type Mode = 'view' | 'add' | 'erase' | 'scale';
 
@@ -23,6 +25,8 @@ export interface PlanView {
   readonly el: HTMLElement;
   /** 파일 고르기 창을 연다. 사용자 클릭 안에서만 불러야 한다 */
   pick(): void;
+  /** 탭이 화면에 보일 때 부른다. 아직 도면이 없으면 기본 도면을 올린다 */
+  activate(): void;
   dispose(): void;
 }
 
@@ -37,6 +41,7 @@ export function createPlanView(): PlanView {
         도면 올리기
         <input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" aria-label="도면 이미지 선택">
       </label>
+      <button type="button" class="btn btn--quiet btn--compact" data-action="default">기본 도면</button>
       <span class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</span>
     </div>
     <div class="plan3d__tools" hidden>
@@ -295,6 +300,7 @@ export function createPlanView(): PlanView {
       if (m === 'view' || m === 'add' || m === 'erase' || m === 'scale') setMode(m);
     },
     undo: () => popUndo(),
+    default: () => void loadDefault(),
     top: () => viewer?.topView(),
     fit: () => viewer?.fitView(),
   });
@@ -370,6 +376,20 @@ export function createPlanView(): PlanView {
     }
   }
 
+  let defaultTried = false;
+  async function loadDefault(): Promise<void> {
+    defaultTried = true;
+    say('기본 도면을 불러오는 중…');
+    try {
+      const res = await fetch(DEFAULT_PLAN_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      await load(new File([blob], 'default.png', { type: blob.type || 'image/png' }));
+    } catch (err) {
+      say(`기본 도면을 불러오지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
   input.addEventListener('change', () => {
     const file = input.files?.[0];
     if (file) void load(file);
@@ -411,6 +431,9 @@ export function createPlanView(): PlanView {
   return {
     el,
     pick: onPick,
+    activate() {
+      if (!defaultTried && !pixels) void loadDefault();
+    },
     dispose() {
       document.removeEventListener(PLAN_PICK_EVENT, onPick);
       document.removeEventListener('keydown', onKey);

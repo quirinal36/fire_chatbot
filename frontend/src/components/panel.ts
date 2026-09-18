@@ -185,6 +185,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       latest = conv?.caseId ? state.cases[conv.caseId] ?? { data: null, state: 'loading', message: null } : undefined;
       if (tab === 'plan' && planView) {
         if (body.firstElementChild !== planView.el) body.replaceChildren(planView.el);
+        planView.activate();
         lastHtml = '';
         lastTab = tab;
         return;

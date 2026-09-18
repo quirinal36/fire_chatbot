@@ -20,6 +20,9 @@ export interface WallPolygon {
   readonly holes: Pt[][];
 }
 
+/** 이보다 어두우면 선. 회색(126) 벽도 잡고 흰 바탕·연한 격자는 버리는 값 */
+export const DEFAULT_DARK = 160;
+
 export interface WallOptions {
   /** 이 값보다 어두운 픽셀을 선으로 본다 (0~255) */
   readonly dark?: number;
@@ -316,7 +319,7 @@ export function polygonsFromMask(mask: Uint8Array, w: number, h: number, eps = 1
 
 /** 이미지 → 벽 마스크. 두께를 지정하지 않으면 추정한다 */
 export function wallMask(rgba: Uint8ClampedArray, w: number, h: number, opts: WallOptions = {}): { mask: Uint8Array; wallPx: number } {
-  const binary = binarize(rgba, w, h, opts.dark ?? 110);
+  const binary = binarize(rgba, w, h, opts.dark ?? DEFAULT_DARK);
   const wallPx = Math.max(2, opts.wallPx ?? estimateThickness(binary, w, h));
   const k = Math.max(3, Math.round(wallPx * 0.6)) | 1;
   const mask = removeSmall(morphOpen(binary, w, h, k), w, h, wallPx * wallPx * 4);
