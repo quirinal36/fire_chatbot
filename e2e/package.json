@@ -7,6 +7,7 @@
     "chat": "./run-aside.sh chat",
     "case": "./run-aside.sh case",
     "admin": "./run-aside.sh admin",
-    "regression": "./run-aside.sh regression"
+    "regression": "./run-aside.sh regression",
+    "answer": "./run-aside.sh answer"
   }
 }

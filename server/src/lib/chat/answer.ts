@@ -257,6 +257,24 @@ export function clarifyingQuestions(question: string, history: readonly string[]
   return [];
 }
 
+/** 근거는 있는데 답을 만들지 못했을 때 물을 것 (ISS-039) */
+const NOT_FOUND_QUESTIONS: readonly { field: string; question: string }[] = [
+  { field: 'aspect', question: '어떤 점이 궁금하신가요? (계산 방법, 설치 기준, 신고·점검 절차, 용어 뜻)' },
+  { field: 'law_hint', question: '찾으시는 법령 이름이나 조문 번호를 알고 계시면 알려 주세요.' },
+];
+
+/**
+ * 답을 만들지 못했으면 그대로 끝내지 않고 무엇이 더 필요한지 묻는다 (ISS-039).
+ * "확인할 수 없습니다"로 끝나면 사용자는 다음에 무엇을 해야 할지 알 수 없다.
+ */
+export function ensureFollowUps(answer: ChatAnswer, question: string, history: readonly string[] = []): ChatAnswer {
+  if (answer.statements.length > 0 || answer.followUpQuestions.length > 0) return answer;
+  const said = [...history, question].join('\n');
+  const questions = dropAnswered([...clarifyingQuestions(question, history), ...NOT_FOUND_QUESTIONS], said).slice(0, 3);
+  if (questions.length === 0) return answer;
+  return { ...answer, followUpQuestions: questions };
+}
+
 function templateAnswer(
   kind: 'insufficient' | 'fallback',
   search: SearchResult,
@@ -402,8 +420,15 @@ export async function generateAnswer(opts: GenerateOptions): Promise<GenerateRes
       });
       if (checked.ok) {
         run.errorCode = null;
-        const status: AnswerStatus = search.status === 'date_unclear' ? 'date_unclear' : 'answered';
-        return { envelope: envelope(status, checked.answer), run: record('succeeded') };
+        // 답을 못 만들었으면 되묻는다. 그대로 끝내면 다음에 무엇을 해야 할지 알 수 없다 (ISS-039)
+        const answer = ensureFollowUps(checked.answer, opts.question, history);
+        const unanswered = answer.statements.length === 0 && answer.followUpQuestions.length > 0;
+        const status: AnswerStatus = unanswered
+          ? 'insufficient_evidence'
+          : search.status === 'date_unclear'
+            ? 'date_unclear'
+            : 'answered';
+        return { envelope: envelope(status, answer), run: record('succeeded') };
       }
       run.validationErrors.push(...checked.errors);
       run.errorCode = 'validation_failed';

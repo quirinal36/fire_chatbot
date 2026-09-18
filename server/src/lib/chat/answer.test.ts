@@ -249,6 +249,34 @@ describe('근거 부족 시 되묻기 (ISS-034)', () => {
     expect(out.envelope.answer.summary).toContain('관할 소방서');
   });
 
+  it('답을 만들지 못했으면 되묻고 끝낸다 (ISS-039)', async () => {
+    const { ensureFollowUps } = await import('./answer');
+    const refusal = { mode: 'legal_search' as const, summary: '제공된 근거에서 확인할 수 없습니다.', statements: [], followUpQuestions: [], limitations: [] };
+    const out = ensureFollowUps(refusal, '학원의 수용인원은 어떻게 계산하나요?');
+    expect(out.followUpQuestions.length).toBeGreaterThan(0);
+    // 답이 있는 응답은 건드리지 않는다
+    const answered = { ...refusal, statements: [{ text: '연면적 33㎡ 이상이면 대상입니다.', sourceIds: ['S1'] }] };
+    expect(ensureFollowUps(answered, '질문')).toBe(answered);
+  });
+
+  it('근거가 있는데 답을 못 만들면 되묻는 질문을 붙인다 (ISS-039)', async () => {
+    const refusal = JSON.stringify({
+      mode: 'legal_search',
+      summary: '제공된 근거에서 학원의 수용인원 계산 방법을 확인할 수 없습니다.',
+      statements: [],
+      followUpQuestions: [],
+      limitations: [],
+    });
+    const out = await generateAnswer({
+      ...base,
+      question: '학원의 수용인원은 어떻게 계산하나요?',
+      search: search(),
+      call: vi.fn().mockResolvedValue(result(refusal)),
+    });
+    expect(out.envelope.answer.followUpQuestions.length).toBeGreaterThan(0);
+    expect(out.envelope.status).toBe('insufficient_evidence');
+  });
+
   it('근거가 없으면 모델 없이 되묻는 답변을 만든다', async () => {
     const call = vi.fn();
     const out = await generateAnswer({

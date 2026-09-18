@@ -230,6 +230,7 @@ node scripts/security-check.mjs               # 권한·비밀값 (운영)
 node scripts/load-test.mjs --count 30         # 비용·지연 (약 $0.2)
 ./e2e/run-aside.sh chat https://fire-chatbot-web.vercel.app   # Aside 브라우저
 ./e2e/run-aside.sh regression https://fire-chatbot-web.vercel.app
+./e2e/run-aside.sh answer https://fire-chatbot-web.vercel.app     # 답변 품질 회귀
 ```
 
 분기마다 한 번, 그리고 모델·임베딩·규칙을 바꿀 때마다 실행한다.
