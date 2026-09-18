@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binarize, buildPolygons, estimateThickness, fillRect, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
+import { binarize, buildPolygons, cutOpening, estimateThickness, fillRect, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -172,5 +172,49 @@ describe('편집', () => {
     expect(closed[10 * w + 20]).toBe(1);
     expect(closed[10 * w + 1]).toBe(0);
     expect(morphClose(mask, w, h, 3)[10 * w + 20]).toBe(0);
+  });
+});
+
+describe('cutOpening', () => {
+  const w = 120;
+  const h = 80;
+  const T = 6;
+  const make = (): Uint8Array => {
+    const mask = new Uint8Array(w * h);
+    fillRect(mask, w, h, { x0: 10, y0: 20, x1: 110, y1: 20 + T }, 1); // 가로 벽
+    fillRect(mask, w, h, { x0: 50, y0: 20, x1: 50 + T, y1: 70 }, 1); // 세로 벽
+    return mask;
+  };
+
+  it('가로 벽에는 클릭한 자리를 가운데 두고 벽 두께를 관통해 뚫는다', () => {
+    const cut = cutOpening(make(), w, h, [80, 23], null, T, 10);
+    expect(cut).toEqual({ rect: { x0: 75, y0: 20, x1: 85, y1: 26 }, axis: 'h', widthPx: 10 });
+  });
+
+  it('세로 벽에는 세로로 뚫는다', () => {
+    const cut = cutOpening(make(), w, h, [53, 50], null, T, 10);
+    expect(cut?.axis).toBe('v');
+    expect(cut?.rect).toEqual({ x0: 50, y0: 45, x1: 56, y1: 55 });
+  });
+
+  it('끌면 끈 구간이 폭이 된다', () => {
+    const cut = cutOpening(make(), w, h, [70, 23], [94, 30], T, 10);
+    expect(cut?.rect).toEqual({ x0: 70, y0: 20, x1: 94, y1: 26 });
+    expect(cut?.widthPx).toBe(24);
+  });
+
+  it('벽 구간을 넘지 않게 당긴다', () => {
+    const cut = cutOpening(make(), w, h, [12, 23], null, T, 30);
+    expect(cut?.rect.x0).toBe(10);
+    expect(cut?.rect.x1).toBe(40);
+  });
+
+  it('벽이 아니면 null, 뚫은 자리는 마스크에서 비워진다', () => {
+    const mask = make();
+    expect(cutOpening(mask, w, h, [80, 60], null, T, 10)).toBeNull();
+    const cut = cutOpening(mask, w, h, [80, 23], null, T, 10);
+    fillRect(mask, w, h, (cut as NonNullable<typeof cut>).rect, 0);
+    expect(mask[23 * w + 80]).toBe(0);
+    expect(mask[23 * w + 70]).toBe(1);
   });
 });

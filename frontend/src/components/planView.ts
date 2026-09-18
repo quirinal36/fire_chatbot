@@ -5,7 +5,7 @@
  */
 import { esc, must, onAction } from '../lib/dom';
 import { createPlan, deletePlan, getPlan, listPlans, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext } from '../api/plans';
-import { DEFAULT_DARK, fillRect, nearestWall, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
+import { cutOpening, DEFAULT_DARK, fillRect, nearestWall, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import type { EditHandlers, Viewer } from '../plan/viewer';
@@ -16,6 +16,8 @@ import type { AppState } from '../types';
 const MAX_SIDE = 1600;
 /** 축척을 모를 때 벽 두께로 가정하는 값(m) */
 const ASSUMED_WALL_M = 0.2;
+/** 문 기본 폭(m). 외여닫이문 유효폭 */
+const DEFAULT_DOOR_M = 0.9;
 const UNDO_LIMIT = 20;
 const PYEONG = 3.3058;
 /** AI 검토에 보내는 그림의 최대 폭(px)과 격자 열 수 */
@@ -29,7 +31,9 @@ export const PLAN_PICK_EVENT = 'plan:pick';
 /** 도면 탭을 처음 열면 자동으로 올리는 기본 도면. frontend/public/plans/ 에 둔다 */
 const DEFAULT_PLAN_URL = '/plans/default.png';
 
-type Mode = 'view' | 'add' | 'erase' | 'scale';
+/** 편집 모드. 버튼·도움말·런타임 검사가 모두 이 목록에서 파생된다 */
+const MODES = ['view', 'add', 'erase', 'door', 'scale'] as const;
+type Mode = (typeof MODES)[number];
 
 export interface PlanView {
   readonly el: HTMLElement;
@@ -81,6 +85,7 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="view" aria-pressed="true">보기</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="add" aria-pressed="false">벽 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="erase" aria-pressed="false">벽 지우기</button>
+        <button type="button" class="btn btn--compact" data-action="mode" data-mode="door" aria-pressed="false">문 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">축척</button>
       </div>
       <div class="plan3d__modes">
@@ -98,6 +103,12 @@ export function createPlanView(actions: AppActions): PlanView {
       <label class="plan3d__field plan3d__field--num">
         <span>벽 두께 (m)</span>
         <input type="number" data-ctl="thickM" min="0.05" step="0.05" value="${ASSUMED_WALL_M}">
+      </label>
+    </div>
+    <div class="plan3d__door" hidden>
+      <label class="plan3d__field plan3d__field--num">
+        <span>문 폭 (m, 끌면 끈 만큼)</span>
+        <input type="number" data-ctl="doorM" min="0.3" max="6" step="0.1" value="${DEFAULT_DOOR_M}">
       </label>
     </div>
     <form class="plan3d__scale" hidden>
@@ -134,6 +145,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const tools = must<HTMLDivElement>('.plan3d__tools', el);
   const help = must<HTMLParagraphElement>('.plan3d__help', el);
   const editBox = must<HTMLDivElement>('.plan3d__edit', el);
+  const doorBox = must<HTMLDivElement>('.plan3d__door', el);
   const scaleForm = must<HTMLFormElement>('.plan3d__scale', el);
   const stage = must<HTMLDivElement>('.plan3d__stage', el);
   const ctl = must<HTMLDivElement>('.plan3d__ctl', el);
@@ -143,6 +155,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const floorIn = must<HTMLInputElement>('[data-ctl="floor"]', el);
   const lengthIn = must<HTMLInputElement>('[data-ctl="length"]', el);
   const thickMIn = must<HTMLInputElement>('[data-ctl="thickM"]', el);
+  const doorMIn = must<HTMLInputElement>('[data-ctl="doorM"]', el);
   const scaleMIn = must<HTMLInputElement>('[data-ctl="scaleM"]', el);
   const heightOut = must<HTMLOutputElement>('[data-out="height"]', el);
   const thickOut = must<HTMLOutputElement>('[data-out="thick"]', el);
@@ -161,6 +174,7 @@ export function createPlanView(actions: AppActions): PlanView {
     view: '',
     add: '바닥을 끌어 벽을 긋습니다. 수평·수직에 가까우면 축에 붙습니다. 길이를 적어 두면 방향만 긋고 길이는 적은 값을 씁니다.',
     erase: '벽을 클릭하면 교차점 사이 한 구간이 지워지고, 끌어서 사각형을 그리면 그 안의 벽이 모두 지워집니다.',
+    door: '벽을 클릭하면 그 자리에 문 폭만큼 개구부가 뚫립니다. 벽을 따라 끌면 끈 만큼이 폭이 됩니다. 문 위에는 인방이 남아 3D 에서 문으로 보입니다.',
     scale: '길이를 아는 벽이나 치수선을 따라 선을 그은 뒤 실제 길이를 넣으세요. 이후 길이·면적이 그 축척으로 계산됩니다.',
   };
 
@@ -186,6 +200,8 @@ export function createPlanView(actions: AppActions): PlanView {
   let userDark: number | null = null;
   /** 창문으로 판정된 개구부(픽셀 사각형) */
   let windowRects: Rect[] = [];
+  /** 문으로 뚫거나 판정된 개구부(픽셀 사각형) */
+  let doorRects: Rect[] = [];
   /** 구역 이름 (구역 번호 → 이름) */
   let roomNames: Record<number, string> = {};
   let lastOpenings: Opening[] = [];
@@ -202,6 +218,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const H = (): number => pixels?.height ?? 0;
   const thickPx = (): number => Math.max(2, Math.round((Number(thickMIn.value) || ASSUMED_WALL_M) * pxPerMeter));
   const metersOf = (a: Pt, b: Pt): number => Math.hypot(b[0] - a[0], b[1] - a[1]) / pxPerMeter;
+  const doorPx = (): number => Math.max(2, Math.round((Number(doorMIn.value) || DEFAULT_DOOR_M) * pxPerMeter));
 
   async function ensureViewer(): Promise<Viewer> {
     if (viewer) return viewer;
@@ -261,7 +278,29 @@ export function createPlanView(actions: AppActions): PlanView {
     if (!prev) return;
     mask = prev;
     undoBtn.disabled = undo.length === 0;
+    // 되돌린 마스크에 벽이 다시 생긴 자리는 더 이상 문이 아니다
+    if (doorRects.length) {
+      doorRects = doorRects.filter((r) => !wallFills(prev, r));
+      viewer?.setDoors(doorRects);
+    }
     rebuild();
+  }
+
+  /** 사각형 안이 벽으로 거의 채워져 있으면 true. 되돌리기로 문이 메워졌는지 본다 */
+  function wallFills(m: Uint8Array, r: Rect): boolean {
+    const x0 = Math.max(0, Math.floor(r.x0));
+    const y0 = Math.max(0, Math.floor(r.y0));
+    const x1 = Math.min(W(), Math.ceil(r.x1));
+    const y1 = Math.min(H(), Math.ceil(r.y1));
+    let total = 0;
+    let filled = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        total++;
+        if (m[y * W() + x]) filled++;
+      }
+    }
+    return total > 0 && filled > total * 0.6;
   }
 
   // ---- 편집 모드
@@ -294,6 +333,10 @@ export function createPlanView(actions: AppActions): PlanView {
         say(`벽 길이 ${metersOf(dragStart, end).toFixed(2)} m`);
       } else if (mode === 'erase') {
         viewer.setGuide(rectPoly(rectOf(dragStart, p)), 'erase');
+      } else if (mode === 'door') {
+        const cut = cutOpening(mask as Uint8Array, W(), H(), dragStart, p, wallPx, doorPx());
+        viewer.setGuide(cut ? rectPoly(cut.rect) : null, 'erase');
+        say(cut ? `문 폭 ${(cut.widthPx / pxPerMeter).toFixed(2)} m` : '벽 위에서 시작하세요.');
       } else if (mode === 'scale') {
         viewer.setGuide(wallOutline(dragStart, p, 2 / (pxPerMeter / 30)), 'scale');
         say(`선 길이 ${Math.hypot(p[0] - dragStart[0], p[1] - dragStart[1]).toFixed(0)} px`);
@@ -325,6 +368,15 @@ export function createPlanView(actions: AppActions): PlanView {
           say('사각형 안의 벽을 지웠습니다.');
         }
         rebuild();
+      } else if (mode === 'door') {
+        const cut = cutOpening(mask, W(), H(), start, moved >= 3 ? p : null, wallPx, doorPx());
+        if (!cut) { say('그 자리에 벽이 없습니다. 벽 위에서 시작하세요.', 'error'); return; }
+        pushUndo();
+        fillRect(mask, W(), H(), cut.rect, 0);
+        doorRects.push(cut.rect);
+        viewer.setDoors(doorRects);
+        say(`문 ${(cut.widthPx / pxPerMeter).toFixed(2)} m 를 냈습니다.`);
+        rebuild();
       } else if (mode === 'scale') {
         if (moved < 5) return;
         scaleLinePx = moved;
@@ -344,6 +396,7 @@ export function createPlanView(actions: AppActions): PlanView {
     help.textContent = HELP[next];
     help.hidden = next === 'view';
     editBox.hidden = next !== 'add';
+    doorBox.hidden = next !== 'door';
     if (next !== 'scale') { scaleForm.hidden = true; viewer?.setGuide(null); }
     viewer?.setEditing(next === 'view' ? null : editHandlers);
     if (wasView && next !== 'view') viewer?.topView();
@@ -352,7 +405,8 @@ export function createPlanView(actions: AppActions): PlanView {
   onAction(el, {
     mode: (b) => {
       const m = b.dataset['mode'];
-      if (m === 'view' || m === 'add' || m === 'erase' || m === 'scale') setMode(m);
+      const hit = MODES.find((x) => x === m);
+      if (hit) setMode(hit);
     },
     undo: () => popUndo(),
     default: () => void loadDefault(true),
@@ -413,8 +467,10 @@ export function createPlanView(actions: AppActions): PlanView {
     v.setWalls(polygonsFromMask(mask, W(), H()));
     v.setModel(W(), H(), source, pxPerMeter);
     windowRects = [];
+    doorRects = [];
     roomNames = {};
     v.setWindows([]);
+    v.setDoors([]);
     // 마스크가 바뀌었으니 지난 검토 제안과 방 목록은 버린다.
     // report 를 비워 두면 뒤따르는 AI 검토가 새 방 목록을 즉시 계산한다
     pendingReview = null;
@@ -578,8 +634,10 @@ export function createPlanView(actions: AppActions): PlanView {
       v.setWalls(polygonsFromMask(mask, W(), H()));
       v.setModel(W(), H(), source, pxPerMeter);
       windowRects = [];
+      doorRects = [];
       roomNames = {};
       v.setWindows([]);
+      v.setDoors([]);
       ctl.hidden = false;
       tools.hidden = false;
       saveBtn.disabled = false;
@@ -773,15 +831,15 @@ export function createPlanView(actions: AppActions): PlanView {
     rv.falseWalls.forEach((f, i) => items.push(item('false', i, `${f.cell} 칸의 벽 지우기 (${f.what})`)));
     rv.missingWalls.forEach((m, i) => items.push(item('missing', i, `벽 추가: (${m.from.x.toFixed(2)}, ${m.from.y.toFixed(2)}) → (${m.to.x.toFixed(2)}, ${m.to.y.toFixed(2)}) ${m.why}`)));
     rv.openings.filter((o) => o.kind === 'window').forEach((o, i) => items.push(item('window', i, `개구부 ${o.id} 은 창문. 창턱과 유리를 세우기`)));
+    rv.openings.filter((o) => o.kind === 'door').forEach((o, i) => items.push(item('door', i, `개구부 ${o.id} 은 문. 위에 인방을 남기기`)));
     rv.rooms.forEach((r, i) => items.push(item('name', i, `구역 ${r.id} 이름을 "${r.name}" 으로`)));
     if (rv.scale.pxPerMeter !== null) items.push(item('scale', 0, `축척 1m = ${rv.scale.pxPerMeter.toFixed(1)}px 적용 (${rv.scale.basis})`, !scaleFixed));
-    const doors = rv.openings.filter((o) => o.kind === 'door').map((o) => o.id);
     const opens = rv.openings.filter((o) => o.kind === 'open').map((o) => o.id);
     reviewBox.innerHTML = `
       <p class="plan3d__total">AI 검토 <strong>${(rv.quality * 100).toFixed(0)}점</strong>
         <span class="plan3d__sub">· ${esc(model)} · ${round}회</span></p>
       <p class="plan3d__sub">${esc(rv.summary)}</p>
-      ${doors.length || opens.length ? `<p class="plan3d__sub">문: ${doors.join(', ') || '없음'} · 트인 곳: ${opens.join(', ') || '없음'}</p>` : ''}
+      ${opens.length ? `<p class="plan3d__sub">벽 없이 트인 곳: ${opens.join(', ')}</p>` : ''}
       ${items.length ? `<ul class="plan3d__suggest">${items.join('')}</ul>` : '<p class="plan3d__sub">고칠 제안이 없습니다.</p>'}
       <div class="plan3d__modes">
         ${items.length ? '<button type="button" class="btn btn--accent btn--compact" data-action="review-apply">선택한 제안 적용</button>' : ''}
@@ -825,6 +883,15 @@ export function createPlanView(actions: AppActions): PlanView {
         if (op && !windowRects.some((r) => r.x0 === op.rect.x0 && r.y0 === op.rect.y0)) windowRects.push(op.rect);
       }
       viewer.setWindows(windowRects);
+    }
+    const doorsPicked = rv.openings.filter((o) => o.kind === 'door').filter((_, i) => has('door', i));
+    if (doorsPicked.length) {
+      const byId = new Map(lastOpenings.map((o) => [o.id, o]));
+      for (const o of doorsPicked) {
+        const op = byId.get(o.id);
+        if (op && !doorRects.some((r) => r.x0 === op.rect.x0 && r.y0 === op.rect.y0)) doorRects.push(op.rect);
+      }
+      viewer.setDoors(doorRects);
     }
     rv.rooms.forEach((r, i) => { if (has('name', i)) roomNames[r.id] = r.name; });
     if (rv.scale.pxPerMeter !== null && has('scale', 0)) {

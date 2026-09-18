@@ -21,6 +21,8 @@ export interface Viewer {
   setRooms(rooms: Room[], names?: Readonly<Record<number, string>>): void;
   /** 창문 자리(픽셀 사각형). 아래엔 창턱, 위엔 유리를 세운다 */
   setWindows(rects: readonly Rect[]): void;
+  /** 문 자리(픽셀 사각형). 문 높이 위로 인방을 남겨 문으로 보이게 한다 */
+  setDoors(rects: readonly Rect[]): void;
   setHeight(meters: number): void;
   setFloorVisible(visible: boolean): void;
   /** 드래그 중 미리보기 다각형(픽셀 좌표). null 이면 지운다 */
@@ -70,18 +72,20 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   const walls = new T.Group();
   const rooms = new T.Group();
   const windows = new T.Group();
+  const doors = new T.Group();
   const sillMat = wallMat;
   const paneMat = new T.MeshStandardMaterial({ color: 0x8fc1e3, transparent: true, opacity: 0.35, roughness: 0.2, side: T.DoubleSide });
   const floor = new T.Mesh(new T.PlaneGeometry(1, 1), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   let guide: THREE.Mesh | null = null;
-  scene.add(walls, rooms, windows, floor);
+  scene.add(walls, rooms, windows, doors, floor);
 
   let polygons: WallPolygon[] = [];
   let roomList: Room[] = [];
   let roomNames: Readonly<Record<number, string>> = {};
   let windowRects: readonly Rect[] = [];
+  let doorRects: readonly Rect[] = [];
   let height = 2.7;
   let s = 1 / 30; // 픽셀 → 미터
   let W = 10;
@@ -117,11 +121,32 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   }
 
   const SILL_M = 0.9;
+  const DOOR_M = 2.1;
+  const rectShape = (r: Rect): THREE.Shape => {
+    const poly: Pt[] = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]];
+    return toShape({ outer: poly, holes: [] });
+  };
+
+  /** 문 위에 남는 벽(인방). 이게 있어야 벽이 그냥 끊긴 자리와 구별된다 */
+  function buildDoors(): void {
+    disposeGroup(doors);
+    const doorH = Math.min(DOOR_M, height * 0.9);
+    const lintelH = height - doorH;
+    if (lintelH <= 0.02) return; // 벽이 문보다 낮으면 인방이 없다
+    for (const r of doorRects) {
+      const geo = new T.ExtrudeGeometry(rectShape(r), { depth: lintelH, bevelEnabled: false });
+      geo.rotateX(Math.PI / 2);
+      geo.translate(0, height, 0); // 벽 맨 위에 붙인다
+      const mesh = new T.Mesh(geo, wallMat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      doors.add(mesh, new T.LineSegments(new T.EdgesGeometry(geo, 30), edgeMat));
+    }
+  }
+
   function buildWindows(): void {
     disposeGroup(windows);
     for (const r of windowRects) {
-      const poly: Pt[] = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]];
-      const shape = toShape({ outer: poly, holes: [] });
+      const shape = rectShape(r);
       const sillH = Math.min(SILL_M, height * 0.4);
       const sill = new T.ExtrudeGeometry(shape, { depth: sillH, bevelEnabled: false });
       sill.rotateX(Math.PI / 2);
@@ -291,6 +316,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
 
       buildWalls();
       buildWindows();
+      buildDoors();
       computeFit();
       buildRooms();
       fitCamera(new T.Vector3(0, 0.8, 1));
@@ -308,10 +334,15 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       windowRects = rects;
       buildWindows();
     },
+    setDoors(rects) {
+      doorRects = rects;
+      buildDoors();
+    },
     setHeight(meters) {
       height = meters;
       buildWalls();
       buildWindows();
+      buildDoors();
     },
     setFloorVisible(visible) {
       floor.visible = visible;
@@ -346,6 +377,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       disposeGroup(walls);
       disposeGroup(rooms);
       disposeGroup(windows);
+      disposeGroup(doors);
       guide?.geometry.dispose();
       floor.geometry.dispose();
       floorMat.map?.dispose();

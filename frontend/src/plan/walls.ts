@@ -462,3 +462,45 @@ export function nearestWall(mask: Uint8Array, w: number, h: number, p: Pt, r: nu
   }
   return best;
 }
+
+export interface OpeningCut {
+  readonly rect: Rect;
+  /** 개구부 폭이 가로면 'h' (= 가로로 이어지는 벽에 난 문) */
+  readonly axis: 'h' | 'v';
+  readonly widthPx: number;
+}
+
+/**
+ * 벽 위의 점 `a` 에 개구부(문·창) 자리를 잡는다. 벽이 이어지는 방향으로 폭을 주고
+ * 벽 두께는 전부 관통한다. `b` 를 주면 `a`~`b` 구간이 폭이 되고, 없으면 `a` 를 가운데 두고
+ * `widthPx` 만큼 벌린다. 어느 쪽이든 그 벽 한 구간을 넘지 않게 당긴다. 벽이 아니면 null.
+ */
+export function cutOpening(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  a: Pt,
+  b: Pt | null,
+  wallPx: number,
+  widthPx: number,
+): OpeningCut | null {
+  const seg = wallSegmentAt(mask, w, h, a, wallPx);
+  if (seg === null) return null;
+  const horizontal = seg.x1 - seg.x0 >= seg.y1 - seg.y0;
+  const lo = horizontal ? seg.x0 : seg.y0;
+  const hi = horizontal ? seg.x1 : seg.y1;
+  const at = horizontal ? a[0] : a[1];
+  const dragged = b === null ? 0 : Math.abs((horizontal ? b[0] : b[1]) - at);
+  // 끌지 않았거나 너무 짧으면 입력한 폭을 쓴다
+  const want = dragged >= 2 ? dragged : widthPx;
+  const span = Math.min(want, hi - lo);
+  if (span < 2) return null;
+  let s = b !== null && dragged >= 2 ? Math.min(at, horizontal ? b[0] : b[1]) : at - span / 2;
+  s = Math.max(lo, Math.min(hi - span, s));
+  const e = s + span;
+  return {
+    rect: horizontal ? { x0: s, y0: seg.y0, x1: e, y1: seg.y1 } : { x0: seg.x0, y0: s, x1: seg.x1, y1: e },
+    axis: horizontal ? 'h' : 'v',
+    widthPx: span,
+  };
+}
