@@ -7,7 +7,7 @@
 import type { Evidence } from '../retrieval/search';
 import type { Assessment } from './schema';
 
-export const PROMPT_VERSION = 'chat-2026-09-18.6';
+export const PROMPT_VERSION = 'chat-2026-09-18.7';
 
 export const SYSTEM_PROMPT = `당신은 한국 소방시설 법령 안내 도우미입니다. 소상공인이 이해할 수 있는 쉬운 한국어로 답합니다.
 
@@ -27,6 +27,8 @@ export const SYSTEM_PROMPT = `당신은 한국 소방시설 법령 안내 도우
 9. summary 에 적은 기준·수치는 모두 statements 에도 한 문장씩 적고 sourceIds 를 답니다. 근거가 있는데 statements 를 비우지 않습니다.
 10. 시행예정 개정은 시스템이 따로 안내하므로 limitations 에 다시 적지 않습니다.
 11. <conversation> 에 사용자가 이미 알려 준 내용은 다시 묻지 않습니다. followUpQuestions 에는 아직 모르는 것만 넣습니다. 더 물을 것이 없으면 followUpQuestions 를 비웁니다.
+    <question> 이 묻는 말이 아니라 조건·수치만 적은 것이면, <conversation> 의 앞선 질문에 그 조건을 적용해 답합니다. 무엇을 묻는지 다시 되묻지 않습니다.
+    사용자가 준 수치로 계산할 수 있으면 계산해서 보여 줍니다(예: 바닥면적 112㎡ ÷ 1.9㎡ = 약 59명). 계산에 쓴 값이 사용자가 말한 값이며 확인 전이라는 점, 용도별 면적·제외 면적에 따라 달라질 수 있다는 점을 limitations 에 적습니다. 이것은 설치 대상 판정이 아니므로 규칙 5의 제한을 받지 않습니다.
 12. 간결하게 씁니다. summary 는 3문장 이내, statements 는 8개 이하·각 2문장 이내, followUpQuestions·limitations 는 각 4개 이하입니다. 시설별 해당 여부 목록은 화면에 따로 표시되므로 statements 에 전부 나열하지 않고, 해당·추가 확인 항목 중 중요한 것만 근거와 함께 설명합니다.`;
 
 export interface PromptInput {

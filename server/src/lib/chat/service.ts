@@ -47,14 +47,27 @@ export interface ChatDeps {
   readonly generateFn?: typeof generateAnswer;
 }
 
+/** 묻는 말인가. 아니면 앞 질문에 대한 조건·보충 설명으로 본다 (ISS-040) */
+export function isQuestion(text: string): boolean {
+  const t = text.trim();
+  if (/[?？]\s*$/u.test(t)) return true;
+  return /(까요|나요|인가요|습니까|은가요|무엇|뭐야|뭔가요|어떻게|어떤|어디|언제|왜|알려\s*주|알려줘|가능한가|되나요|해야\s*하나)/u.test(t);
+}
+
 /**
- * 되묻기에 답한 글은 "질문 → 답" 목록이라 그대로 검색하면 원래 무엇을 물었는지가 빠진다.
- * 처음 물었던 질문을 앞에 붙여 검색한다 (ISS-037).
+ * 검색어를 만든다 (ISS-037 · ISS-040).
+ *
+ * 대화는 이어진다. "우리 학원은 강의실이 3개야. 총 면적은 112제곱미터야" 처럼
+ * 앞 질문에 대한 조건만 적으면 그 글만으로는 무엇을 찾아야 할지 알 수 없다.
+ * 되묻기에 답한 글("질문 → 답")도 마찬가지다. 이런 글은 앞의 질문과 합쳐 찾는다.
  */
 export function searchQuery(question: string, history: readonly string[]): string {
-  if (!question.includes('→') || history.length === 0) return question;
-  const first = history[0]!;
-  return first.includes('→') ? question : `${first}\n${question}`;
+  if (history.length === 0) return question;
+  const supplement = question.includes('→') || !isQuestion(question);
+  if (!supplement) return question;
+  // 이 대화에서 사용자가 실제로 물었던 가장 최근 질문
+  const topic = [...history].reverse().find((h) => !h.includes('→') && isQuestion(h));
+  return topic === undefined ? question : `${topic}\n${question}`;
 }
 
 export async function runChat(req: ChatRequest, deps: ChatDeps): Promise<void> {

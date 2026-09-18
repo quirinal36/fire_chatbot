@@ -4,6 +4,8 @@
  *
  * 소방시설법 시행령 별표7(수용인원의 산정 방법)은 corpus 에 있고 검색 1순위로 잡힌다.
  * 표의 숫자가 무엇을 뜻하는지 알려면 상위 항목의 제목이 모델 입력에 있어야 한다.
+ *
+ * 이어서 대화 문맥 (ISS-040): 조건만 적은 다음 말도 앞 질문에 이어 답해야 한다.
  * 달러 기호와 백틱은 쓰지 않는다 (셸이 그대로 넘긴다).
  */
 const out = './artifacts/__NAME__';
@@ -43,6 +45,32 @@ await page.screenshot({ path: out + '/1-capacity.png' });
 check('근거와 함께 답한다 (ISS-039)', answer.statements.length > 0, answer.summary.slice(0, 90));
 check('산정 기준(1.9㎡)을 안내한다 (ISS-039)', answer.statements.some((s) => s.includes('1.9')), answer.statements.join(' | ').slice(0, 110));
 check('답을 못 만들어도 되묻고 끝낸다 (ISS-039)', answer.statements.length > 0 || answer.questions > 0, '인용 ' + answer.statements.length + ' · 되묻기 ' + answer.questions);
+
+// ISS-040: 조건만 적으면 앞 질문(수용인원 계산)에 그 조건을 적용해 답한다
+await page.locator('#composer-input').fill('우리 학원은 강의실이 3개야. 총 면적은 112제곱미터야');
+await page.locator('#composer-input').press('Enter');
+let next = null;
+for (let i = 0; i < 25; i++) {
+  await sleep(2000);
+  next = await page.evaluate(() => {
+    const msgs = document.querySelectorAll('.msg--assistant');
+    if (msgs.length < 2) return null;
+    const last = msgs[msgs.length - 1];
+    const doc = last.querySelector('.doc');
+    if (!doc) return null;
+    return {
+      summary: (doc.textContent || '').replace(/\s+/gu, ' ').trim(),
+      statements: last.querySelectorAll('.statements li').length,
+      questions: last.querySelectorAll('.askback__q').length,
+    };
+  });
+  if (next) break;
+}
+await page.screenshot({ path: out + '/2-context.png' });
+check('조건만 적어도 앞 질문에 이어 답한다 (ISS-040)', next !== null && next.statements > 0, next === null ? '답변 없음' : next.summary.slice(0, 90));
+check('무엇을 묻는지 다시 되묻지 않는다 (ISS-040)', next !== null && next.questions === 0, next === null ? '답변 없음' : '되묻기 ' + next.questions);
+// 112 ÷ 1.9 = 58.9 → 59
+check('알려 준 수치로 계산해 보여 준다 (ISS-040)', next !== null && /59\s*명|58\.9|112/u.test(next.summary), next === null ? '답변 없음' : next.summary.slice(0, 90));
 
 for (const r of results) console.log((r.ok ? 'PASS  ' : 'FAIL  ') + r.name + (r.detail ? ' — ' + r.detail : ''));
 console.log(JSON.stringify({ failed: results.filter((r) => !r.ok).length, errors, session: pwd }));

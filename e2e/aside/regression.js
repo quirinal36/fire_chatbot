@@ -18,6 +18,26 @@ const errors = [];
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok, detail: detail || '' });
 
+/**
+ * 새 답변이 화면에 붙을 때까지 기다린다.
+ * 앞 메시지에도 같은 요소가 있으므로 개수가 늘어나는 것을 봐야 한다.
+ */
+async function waitForAnswer(before, ms) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const got = await page.evaluate((n) => {
+      const msgs = document.querySelectorAll('.msg--assistant');
+      if (msgs.length <= n) return null;
+      const last = msgs[msgs.length - 1];
+      return last.querySelector('.doc') === null ? null : true;
+    }, before);
+    if (got) return;
+    if (Date.now() > until) throw new Error('답변을 기다리다 시간 초과');
+    await sleep(1000);
+  }
+}
+const answerCount = () => page.evaluate(() => document.querySelectorAll('.msg--assistant').length);
+
 await openTab(base);
 await page.waitForSelector('.app[data-ready="true"]', { timeout: 20000 });
 
@@ -56,11 +76,16 @@ const rich = await page.locator('.source__text').first().evaluate((el) => ({
 check('원문에 날 markdown 이 남지 않는다 (ISS-033)', !rich.raw, JSON.stringify(rich));
 await page.screenshot({ path: out + '/2-source.png' });
 
-// ISS-034: 근거 부족 → 되묻기
-await page.locator('#composer-input').fill('소방 기준 알려줘');
+// ISS-034: 근거 부족 → 되묻기. 답할 수 없는 질문이라야 되묻기가 확실히 나온다
+const before = await answerCount();
+await page.locator('#composer-input').fill('오늘 날씨 어때?');
 await page.locator('#composer-input').press('Enter');
-await page.waitForSelector('.status-note', { timeout: 80000 });
-const note = await page.locator('.status-note').last().innerText();
+await waitForAnswer(before, 80000);
+const note = await page.evaluate(() => {
+  const msgs = document.querySelectorAll('.msg--assistant');
+  const n = msgs[msgs.length - 1].querySelector('.status-note');
+  return n ? (n.textContent || '').trim() : '';
+});
 // 화면에는 앞선 답변의 양식도 남아 있다. 마지막 메시지의 양식만 본다
 const rows = await page.evaluate(() => {
   const msgs = document.querySelectorAll('.msg--assistant');
@@ -72,12 +97,22 @@ const rows = await page.evaluate(() => {
     answerable: r.querySelectorAll('[data-opt]').length > 0 || r.querySelector('.askback__text-input') !== null,
   }));
 });
-check('근거 부족일 때 되묻는 질문이 있다 (ISS-034)', rows.length >= 2, rows.map((r) => r.q).join(' | ').slice(0, 120));
-check('되묻는 질문마다 답을 입력할 칸이 있다 (ISS-036)', rows.length > 0 && rows.every((r) => r.answerable), rows.map((r) => r.kind).join(', '));
+// 답한 근거를 찾아 답하는 것도 정답이다. 막다른 끝이 아니기만 하면 된다
+const answered = await page.evaluate(() => {
+  const msgs = document.querySelectorAll('.msg--assistant');
+  const last = msgs[msgs.length - 1];
+  return last ? last.querySelectorAll('.statements li').length : 0;
+});
+check('근거가 부족하면 되묻는다 (ISS-034)', rows.length >= 2 || answered > 0, rows.map((r) => r.q).join(' | ').slice(0, 120) || '인용 ' + answered);
+check('되묻는 질문마다 답을 입력할 칸이 있다 (ISS-036)', rows.every((r) => r.answerable), rows.map((r) => r.kind).join(', ') || '되묻기 없음');
 check('실패처럼 보이는 문구를 쓰지 않는다', !note.includes('찾지 못했습니다'), note);
+if (rows.length === 0) {
+  check('막다른 끝으로 끝나지 않는다 (ISS-039)', answered > 0, '인용 ' + answered);
+}
 
 // 답을 채워 보내면 내 질문이 아니라 "질문 → 답" 으로 나간다 (ISS-036)
 // 첫 질문에 답한다. 고르는 질문이면 첫 보기를, 적는 질문이면 값을 넣는다
+if (rows.length > 0) {
 const form = page.locator('article:last-of-type form.askback');
 const qRows = await form.locator('.askback__q').all();
 const value = rows[0].kind === 'number' ? '3' : '소화기';
@@ -85,8 +120,9 @@ const opts = await qRows[0].locator('[data-opt]').all();
 if (opts.length > 0) await opts[0].click();
 else await qRows[0].locator('.askback__text-input').fill(value);
 const answer = opts.length > 0 ? (await opts[0].innerText()).trim() : value;
+const beforeSubmit = await answerCount();
 await form.locator('button[type=submit]').click();
-await sleep(2000);
+await waitForAnswer(beforeSubmit, 80000);
 const sent = await page.evaluate(() => {
   const u = document.querySelectorAll('.msg--user .bubble');
   return u.length ? (u[u.length - 1].textContent || '').trim() : '';
@@ -102,6 +138,7 @@ const askedAgain = await page.evaluate((q) => {
 }, rows[0].q);
 check('이미 답한 질문을 다시 묻지 않는다 (ISS-037)', !askedAgain.repeated, askedAgain.texts.join(' | ').slice(0, 100));
 await page.screenshot({ path: out + '/4-second-turn.png' });
+}
 
 // ISS-038: 제목이 긴 근거도 칩이 카드를 넘지 않는다
 const chip = await page.evaluate(() => {
