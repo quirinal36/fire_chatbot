@@ -4,7 +4,7 @@
  * 동적으로 불러와 채팅 화면 번들에 섞이지 않게 한다.
  */
 import type * as THREE from 'three';
-import type { Pt, WallPolygon } from './walls';
+import type { Pt, Rect, WallPolygon } from './walls';
 import type { Room } from './rooms';
 
 export interface EditHandlers {
@@ -17,7 +17,10 @@ export interface Viewer {
   /** 도면 크기와 축척을 정한다. 바닥 텍스처를 깔고 카메라를 맞춘다 */
   setModel(width: number, height: number, floor: HTMLCanvasElement | null, pxPerMeter: number): void;
   setWalls(polygons: WallPolygon[]): void;
-  setRooms(rooms: Room[]): void;
+  /** 구역 바닥 색과 표. names 가 있으면 번호 대신 이름을 쓴다 */
+  setRooms(rooms: Room[], names?: Readonly<Record<number, string>>): void;
+  /** 창문 자리(픽셀 사각형). 아래엔 창턱, 위엔 유리를 세운다 */
+  setWindows(rects: readonly Rect[]): void;
   setHeight(meters: number): void;
   setFloorVisible(visible: boolean): void;
   /** 드래그 중 미리보기 다각형(픽셀 좌표). null 이면 지운다 */
@@ -66,14 +69,19 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   };
   const walls = new T.Group();
   const rooms = new T.Group();
+  const windows = new T.Group();
+  const sillMat = wallMat;
+  const paneMat = new T.MeshStandardMaterial({ color: 0x8fc1e3, transparent: true, opacity: 0.35, roughness: 0.2, side: T.DoubleSide });
   const floor = new T.Mesh(new T.PlaneGeometry(1, 1), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   let guide: THREE.Mesh | null = null;
-  scene.add(walls, rooms, floor);
+  scene.add(walls, rooms, windows, floor);
 
   let polygons: WallPolygon[] = [];
   let roomList: Room[] = [];
+  let roomNames: Readonly<Record<number, string>> = {};
+  let windowRects: readonly Rect[] = [];
   let height = 2.7;
   let s = 1 / 30; // 픽셀 → 미터
   let W = 10;
@@ -108,26 +116,46 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     }
   }
 
+  const SILL_M = 0.9;
+  function buildWindows(): void {
+    disposeGroup(windows);
+    for (const r of windowRects) {
+      const poly: Pt[] = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]];
+      const shape = toShape({ outer: poly, holes: [] });
+      const sillH = Math.min(SILL_M, height * 0.4);
+      const sill = new T.ExtrudeGeometry(shape, { depth: sillH, bevelEnabled: false });
+      sill.rotateX(Math.PI / 2);
+      sill.translate(0, sillH, 0);
+      const sillMesh = new T.Mesh(sill, sillMat);
+      sillMesh.castShadow = sillMesh.receiveShadow = true;
+      const paneH = Math.max(0.05, height * 0.85 - sillH);
+      const pane = new T.ExtrudeGeometry(shape, { depth: paneH, bevelEnabled: false });
+      pane.rotateX(Math.PI / 2);
+      pane.translate(0, sillH + paneH, 0);
+      windows.add(sillMesh, new T.Mesh(pane, paneMat), new T.LineSegments(new T.EdgesGeometry(sill, 30), edgeMat));
+    }
+  }
+
   function labelSprite(text: string, hue: number): THREE.Sprite {
     const c = document.createElement('canvas');
-    c.width = 256;
+    c.width = 320;
     c.height = 96;
     const ctx = c.getContext('2d');
     if (ctx) {
       ctx.fillStyle = `hsla(${hue}, 60%, 30%, 0.85)`;
       ctx.beginPath();
-      ctx.roundRect(8, 8, 240, 80, 20);
+      ctx.roundRect(8, 8, 304, 80, 20);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.font = '600 40px system-ui, sans-serif';
+      ctx.font = '600 36px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, 128, 50);
+      ctx.fillText(text, 160, 50, 288);
     }
     const tex = new T.CanvasTexture(c);
     tex.colorSpace = T.SRGBColorSpace;
     const sprite = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false }));
-    const wide = Math.max(0.8, fitRadius * 0.14);
+    const wide = Math.max(0.8, fitRadius * 0.16);
     sprite.scale.set(wide, wide * 0.375, 1);
     return sprite;
   }
@@ -145,7 +173,8 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
         const mesh = new T.Mesh(geo, mat);
         rooms.add(mesh);
       }
-      const label = labelSprite(`${room.id} · ${room.area.toFixed(1)}㎡`, hue);
+      const name = roomNames[room.id];
+      const label = labelSprite(`${name ?? room.id} · ${room.area.toFixed(1)}㎡`, hue);
       label.position.set(room.center[0] * s, 0.3, room.center[1] * s);
       rooms.add(label);
     });
@@ -261,6 +290,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       cam.updateProjectionMatrix();
 
       buildWalls();
+      buildWindows();
       computeFit();
       buildRooms();
       fitCamera(new T.Vector3(0, 0.8, 1));
@@ -269,13 +299,19 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       polygons = next;
       buildWalls();
     },
-    setRooms(next) {
+    setRooms(next, names = {}) {
       roomList = next;
+      roomNames = names;
       buildRooms();
+    },
+    setWindows(rects) {
+      windowRects = rects;
+      buildWindows();
     },
     setHeight(meters) {
       height = meters;
       buildWalls();
+      buildWindows();
     },
     setFloorVisible(visible) {
       floor.visible = visible;
@@ -309,6 +345,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       controls.dispose();
       disposeGroup(walls);
       disposeGroup(rooms);
+      disposeGroup(windows);
       guide?.geometry.dispose();
       floor.geometry.dispose();
       floorMat.map?.dispose();

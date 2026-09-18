@@ -1,0 +1,219 @@
+/**
+ * 도면 AI 검토. 알고리즘이 벽을 잡은 결과(원본 위에 벽·격자·개구부 번호·구역 번호를 겹친 그림)를
+ * 시각 모델에 보여 주고, 무엇을 고칠지 구조화 JSON 으로 받는다. 수정 자체는 화면 쪽 알고리즘이 한다.
+ *
+ * 모델은 픽셀 좌표에 약하므로 잘못 잡힌 벽은 격자 칸으로, 빠진 벽은 0~1 정규화 좌표로 받고,
+ * 개구부·구역은 우리가 번호를 매겨 보낸 것을 번호로 되돌려 받는다.
+ */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { callChatModel, ModelError } from './chat/openrouter';
+import { env } from './env';
+import { HttpError } from './http-error';
+import { log } from './log';
+
+export const REVIEW_PROMPT_VERSION = 'plan-review-v1';
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+/** 화면이 함께 보내는 상황 정보 */
+export const contextSchema = z.object({
+  planId: z.uuid().nullable().default(null),
+  round: z.number().int().min(1).max(3).default(1),
+  grid: z.object({ cols: z.number().int().min(2).max(26), rows: z.number().int().min(2).max(40) }),
+  /** 지금 쓴 매개변수 */
+  params: z.object({ dark: z.number().int().min(0).max(255), wallPx: z.number().int().min(1).max(256), pxPerMeter: z.number().positive() }),
+  openings: z.array(z.object({ id: z.number().int().min(1), widthM: z.number().nonnegative(), cell: z.string().max(4) })).max(80),
+  rooms: z.array(z.object({ id: z.number().int().min(1), areaM2: z.number().nonnegative(), cell: z.string().max(4) })).max(60),
+});
+export type ReviewContext = z.infer<typeof contextSchema>;
+
+const pt = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+export const reviewSchema = z.object({
+  quality: z.number().min(0).max(1),
+  summary: z.string().max(400),
+  falseWalls: z.array(z.object({ cell: z.string().max(4), what: z.string().max(80) })).max(60),
+  missingWalls: z.array(z.object({ from: pt, to: pt, why: z.string().max(80) })).max(40),
+  openings: z.array(z.object({ id: z.number().int(), kind: z.enum(['door', 'window', 'open']) })).max(80),
+  rooms: z.array(z.object({ id: z.number().int(), name: z.string().max(40) })).max(60),
+  scale: z.object({ pxPerMeter: z.number().positive().nullable(), basis: z.string().max(120) }),
+  params: z.object({ dark: z.number().int().min(0).max(255).nullable(), wallPx: z.number().int().min(1).max(256).nullable() }),
+});
+export type PlanReview = z.infer<typeof reviewSchema>;
+
+/** OpenRouter strict 모드용 JSON 스키마. 모든 속성이 required 이고 additionalProperties 가 false 여야 한다 */
+const point = { type: 'object', additionalProperties: false, required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' } } };
+export const REVIEW_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['quality', 'summary', 'falseWalls', 'missingWalls', 'openings', 'rooms', 'scale', 'params'],
+  properties: {
+    quality: { type: 'number', description: '벽 검출이 도면과 얼마나 맞는지 0~1' },
+    summary: { type: 'string', description: '한국어 한두 문장 총평' },
+    falseWalls: {
+      type: 'array',
+      description: '벽이 아닌데 벽(빨강)으로 잡힌 격자 칸',
+      items: { type: 'object', additionalProperties: false, required: ['cell', 'what'], properties: { cell: { type: 'string' }, what: { type: 'string', description: '무엇이 잡혔는지 (가구, 계단, 글자 등)' } } },
+    },
+    missingWalls: {
+      type: 'array',
+      description: '도면에는 있는데 빨강으로 잡히지 않은 벽. 이미지 폭·높이를 1 로 본 좌표',
+      items: { type: 'object', additionalProperties: false, required: ['from', 'to', 'why'], properties: { from: point, to: point, why: { type: 'string' } } },
+    },
+    openings: {
+      type: 'array',
+      description: '파란 번호로 표시한 개구부의 종류',
+      items: { type: 'object', additionalProperties: false, required: ['id', 'kind'], properties: { id: { type: 'integer' }, kind: { type: 'string', enum: ['door', 'window', 'open'] } } },
+    },
+    rooms: {
+      type: 'array',
+      description: '초록 번호로 표시한 구역의 이름. 도면 글자를 읽어 한국어로. 모르면 용도 추정',
+      items: { type: 'object', additionalProperties: false, required: ['id', 'name'], properties: { id: { type: 'integer' }, name: { type: 'string' } } },
+    },
+    scale: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['pxPerMeter', 'basis'],
+      properties: {
+        pxPerMeter: { type: ['number', 'null'], description: '보낸 이미지 기준 1m 당 픽셀. 근거가 없으면 null' },
+        basis: { type: 'string', description: '무엇을 근거로 했는지 (치수 글자, 문 폭 0.9m 등)' },
+      },
+    },
+    params: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['dark', 'wallPx'],
+      properties: {
+        dark: { type: ['integer', 'null'], description: '다시 돌릴 때 권할 어두움 기준(0~255). 지금 값이 좋으면 null' },
+        wallPx: { type: ['integer', 'null'], description: '다시 돌릴 때 권할 벽 두께(px). 지금 값이 좋으면 null' },
+      },
+    },
+  },
+} as const;
+
+export function buildPrompt(ctx: ReviewContext, imageWidth: number, imageHeight: number): string {
+  const cols = Array.from({ length: ctx.grid.cols }, (_, i) => String.fromCharCode(65 + i)).join('');
+  const openings = ctx.openings.length
+    ? ctx.openings.map((o) => `${o.id}: ${o.cell} 칸, 폭 ${o.widthM.toFixed(1)}m`).join('; ')
+    : '없음';
+  const rooms = ctx.rooms.length ? ctx.rooms.map((r) => `${r.id}: ${r.cell} 칸, ${r.areaM2.toFixed(1)}㎡`).join('; ') : '없음';
+  return [
+    '당신은 건축 평면도 검토자입니다. 첨부 그림은 2D 평면도 원본 위에 프로그램이 자동으로 찾은 벽을 빨간색 반투명으로 겹친 것입니다.',
+    `그림 위에 ${ctx.grid.cols}×${ctx.grid.rows} 격자를 그렸고 칸 이름은 열 글자(${cols}) + 행 숫자(1~${ctx.grid.rows})입니다. 예: C4.`,
+    '파란 사각형과 숫자는 벽이 끊긴 개구부, 초록 원과 숫자는 프로그램이 나눈 구역입니다.',
+    `그림 크기 ${imageWidth}×${imageHeight}px. 지금 매개변수: 어두움 기준 ${ctx.params.dark}, 벽 두께 ${ctx.params.wallPx}px, 1m 당 ${ctx.params.pxPerMeter.toFixed(1)}px (검토 ${ctx.round}회째).`,
+    `개구부 목록: ${openings}`,
+    `구역 목록: ${rooms}`,
+    '',
+    '다음을 JSON 으로 답하세요.',
+    '1. quality: 빨간 벽이 실제 벽과 맞는 정도 0~1. 가구·계단·글자가 벽으로 잡혔거나 벽이 빠졌으면 낮춥니다.',
+    '2. falseWalls: 벽이 아닌데 빨갛게 칠해진 칸. 책상·의자·계단·엘리베이터·글자·해치 무늬가 흔합니다. 칸 하나씩.',
+    '3. missingWalls: 도면에 벽이 있는데 빨강이 없는 곳. 벽의 양 끝을 이미지 폭·높이를 1 로 본 좌표로. 창·문 자리는 벽이 아니므로 넣지 않습니다.',
+    '4. openings: 파란 번호마다 door(문. 호나 여닫이 표시), window(창. 벽 사이 가는 선·이중선), open(벽 없이 트인 곳).',
+    '5. rooms: 초록 번호마다 도면 글자를 읽어 이름을 붙입니다 (예: 주방, 회의실, 복도, 화장실, 계단실). 글자가 없으면 모양과 설비로 추정합니다.',
+    '6. scale: 치수 글자가 있으면 그것으로, 없으면 일반 문 폭 0.9m 또는 화장실 변기·계단 폭 같은 표준 치수로 1m 당 픽셀을 추정합니다. 근거가 없으면 null.',
+    '7. params: 벽이 많이 빠졌으면 어두움 기준을 올리거나 벽 두께를 낮추고, 가구가 많이 잡혔으면 벽 두께를 올리라고 권합니다. 지금이 좋으면 null.',
+    '모르는 것은 비워 두고 지어내지 마세요. summary 는 한국어 한두 문장.',
+  ].join('\n');
+}
+
+export interface ReviewInput {
+  ctx: ReviewContext;
+  image: { bytes: Uint8Array; type: string; width: number; height: number };
+}
+
+/** multipart 본문: meta(JSON 문자열), image(파일) */
+export async function parseReviewUpload(req: Request): Promise<ReviewInput> {
+  const type = req.headers.get('content-type') ?? '';
+  if (!type.includes('multipart/form-data')) throw new HttpError(415, 'unsupported_media_type', 'multipart 본문이 필요합니다.');
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    throw new HttpError(400, 'invalid_request', '본문을 읽지 못했습니다.');
+  }
+  const metaRaw = form.get('meta');
+  if (typeof metaRaw !== 'string') throw new HttpError(400, 'invalid_request', 'meta 가 필요합니다.');
+  let metaJson: unknown;
+  try {
+    metaJson = JSON.parse(metaRaw);
+  } catch {
+    throw new HttpError(400, 'invalid_json', 'meta 가 JSON 이 아닙니다.');
+  }
+  const parsedMeta = z
+    .object({ context: contextSchema, width: z.number().int().min(64).max(2048), height: z.number().int().min(64).max(2048) })
+    .safeParse(metaJson);
+  if (!parsedMeta.success) throw new HttpError(400, 'invalid_request', '검토 정보를 확인해 주세요.');
+  const file = form.get('image');
+  if (!(file instanceof File)) throw new HttpError(400, 'invalid_request', 'image 파일이 필요합니다.');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new HttpError(415, 'unsupported_media_type', '이미지 형식이 아닙니다.');
+  if (file.size > MAX_IMAGE_BYTES) throw new HttpError(413, 'payload_too_large', '이미지가 너무 큽니다.');
+  return {
+    ctx: parsedMeta.data.context,
+    image: { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type, width: parsedMeta.data.width, height: parsedMeta.data.height },
+  };
+}
+
+export interface ReviewOutcome {
+  readonly review: PlanReview;
+  readonly model: string;
+  readonly promptVersion: string;
+  readonly usage: { inputTokens: number; outputTokens: number; costUsd: number | null };
+  readonly latencyMs: number;
+}
+
+export async function reviewPlan(input: ReviewInput, fetchImpl?: typeof fetch): Promise<ReviewOutcome> {
+  const model = env().OPENROUTER_VISION_MODEL;
+  const dataUrl = `data:${input.image.type};base64,${Buffer.from(input.image.bytes).toString('base64')}`;
+  const result = await callChatModel(
+    [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: buildPrompt(input.ctx, input.image.width, input.image.height) },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    { model, schema: { name: 'PlanReview', schema: REVIEW_JSON_SCHEMA }, maxTokens: 2500, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
+  );
+  let json: unknown;
+  try {
+    json = JSON.parse(result.content);
+  } catch {
+    throw new ModelError('invalid_output', false, '모델 응답이 JSON 이 아니다');
+  }
+  const parsed = reviewSchema.safeParse(json);
+  if (!parsed.success) throw new ModelError('invalid_output', false, `모델 응답이 스키마와 다르다: ${parsed.error.issues[0]?.path.join('.') ?? ''}`);
+  // 우리가 보낸 번호만 받아들인다
+  const openingIds = new Set(input.ctx.openings.map((o) => o.id));
+  const roomIds = new Set(input.ctx.rooms.map((r) => r.id));
+  const review: PlanReview = {
+    ...parsed.data,
+    openings: parsed.data.openings.filter((o) => openingIds.has(o.id)),
+    rooms: parsed.data.rooms.filter((r) => roomIds.has(r.id)),
+  };
+  return { review, model: result.model, promptVersion: REVIEW_PROMPT_VERSION, usage: result.usage, latencyMs: result.latencyMs };
+}
+
+export async function recordReview(
+  db: SupabaseClient,
+  ownerId: string,
+  ctx: ReviewContext,
+  outcome: ReviewOutcome | null,
+  errorCode: string | null,
+  model: string,
+): Promise<void> {
+  const { error } = await db.from('plan_reviews').insert({
+    owner_id: ownerId,
+    plan_id: ctx.planId,
+    model: outcome?.model ?? model,
+    round: ctx.round,
+    quality: outcome?.review.quality ?? null,
+    input_tokens: outcome?.usage.inputTokens ?? 0,
+    output_tokens: outcome?.usage.outputTokens ?? 0,
+    cost_usd: outcome?.usage.costUsd ?? null,
+    latency_ms: outcome?.latencyMs ?? null,
+    error_code: errorCode,
+  });
+  if (error) log('error', 'plan review record failed', { err: error.message });
+}

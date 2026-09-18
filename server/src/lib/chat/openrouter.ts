@@ -35,8 +35,16 @@ export interface ModelResult {
   readonly latencyMs: number;
 }
 
+/** OpenAI 호환 메시지 본문. 문자열이거나 글·이미지 조각 배열 */
+export type ContentPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image_url'; readonly image_url: { readonly url: string } };
+export type MessageContent = string | readonly ContentPart[];
+
 export interface CallOptions {
   readonly model: string;
+  /** 구조화 출력 스키마. 생략하면 답변 스키마 */
+  readonly schema?: { readonly name: string; readonly schema: Record<string, unknown> };
   readonly maxTokens?: number;
   readonly retries?: number;
   readonly fetchImpl?: typeof fetch;
@@ -55,7 +63,7 @@ export function classifyStatus(status: number): { kind: ModelErrorKind; retryabl
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export async function callChatModel(
-  messages: readonly { role: string; content: string }[],
+  messages: readonly { role: string; content: MessageContent }[],
   opts: CallOptions,
 ): Promise<ModelResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -66,7 +74,10 @@ export async function callChatModel(
     messages,
     temperature: 0,
     max_tokens: opts.maxTokens ?? 1500,
-    response_format: { type: 'json_schema', json_schema: { name: 'ChatAnswer', strict: true, schema: CHAT_ANSWER_JSON_SCHEMA } },
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: opts.schema?.name ?? 'ChatAnswer', strict: true, schema: opts.schema?.schema ?? CHAT_ANSWER_JSON_SCHEMA },
+    },
     provider: { require_parameters: true },
     usage: { include: true },
   };

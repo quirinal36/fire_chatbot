@@ -446,3 +446,19 @@ export function wallSegmentAt(mask: Uint8Array, w: number, h: number, p: Pt, wal
   while (ok(b + 1)) b++;
   return { x0: hx0, y0: a, x1: hx1 + 1, y1: b + 1 };
 }
+
+/** p 에서 반지름 r 안의 가장 가까운 벽 픽셀. 없으면 p 그대로. 그은 벽 끝을 기존 벽에 붙일 때 쓴다 */
+export function nearestWall(mask: Uint8Array, w: number, h: number, p: Pt, r: number): Pt {
+  const cx = Math.round(p[0]);
+  const cy = Math.round(p[1]);
+  let best: Pt = p;
+  let bestD = Infinity;
+  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
+    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
+      if (!mask[y * w + x]) continue;
+      const d = (x - p[0]) ** 2 + (y - p[1]) ** 2;
+      if (d < bestD) { bestD = d; best = [x + 0.5, y + 0.5]; }
+    }
+  }
+  return best;
+}

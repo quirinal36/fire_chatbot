@@ -38,6 +38,8 @@ const schema = z.object({
   OPENROUTER_CHAT_MODEL: z.string().default('anthropic/claude-haiku-4.5'),
   /** 비워 두면 대체 모델을 쓰지 않는다. 인젝션·날조 시험을 통과한 모델만 넣는다 (기획서 §6.4) */
   OPENROUTER_FALLBACK_MODEL: optionalKey,
+  /** 도면 AI 검토(시각) 모델. Gemini 계열로 정했다 (docs/decisions.md) */
+  OPENROUTER_VISION_MODEL: z.string().default('google/gemini-3.8-flash'),
   CRON_SECRET: optionalKey,
   /** 하루 요청 한도. 익명 세션·로그인 사용자·IP 별 */
   LIMIT_ANON_PER_DAY: z.coerce.number().int().positive().default(30),
