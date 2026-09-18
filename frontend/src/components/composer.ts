@@ -1,6 +1,7 @@
 import { FEATURES } from '../config';
 import { must } from '../lib/dom';
 import { icons } from '../lib/icons';
+import { PLAN_PICK_EVENT } from './planView';
 import type { AppActions } from '../actions';
 import type { Component } from './sidebar';
 
@@ -29,9 +30,14 @@ export function mountComposer(root: HTMLElement, actions: AppActions): Component
     </form>
   `;
 
-  // 도면 첨부는 기획서 §2.2 의 후속 범위다. src/config.ts 참고.
+  // 도면 첨부: 도면 탭을 열고 이미지를 고르게 한다. src/config.ts 참고.
   const attach = must<HTMLButtonElement>('[data-feature="planPanel"]', root);
   attach.hidden = !FEATURES.planPanel;
+  attach.addEventListener('click', () => {
+    actions.openPanel('plan');
+    // 패널이 그려진 뒤 같은 클릭 안에서 파일 창을 연다 (사용자 동작 안에서만 열린다)
+    document.dispatchEvent(new Event(PLAN_PICK_EVENT));
+  });
 
   const form = must<HTMLFormElement>('form', root);
   const input = must<HTMLTextAreaElement>('#composer-input', root);

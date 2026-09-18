@@ -2,7 +2,7 @@ import { FEATURES } from '../config';
 import { esc, must, onAction } from '../lib/dom';
 import { renderRich } from '../lib/markdown';
 import { icons } from '../lib/icons';
-import { planSvg } from '../data/plan';
+import { createPlanView } from './planView';
 import type { AppActions } from '../actions';
 import type { AnswerEnvelope, AppState, AssistantMessage, PanelTab, SourceRef, SourceView } from '../types';
 import type { Component } from './sidebar';
@@ -113,10 +113,6 @@ function renderChecks(envelope: AnswerEnvelope | null): string {
     <p class="panel__note">규칙 버전 ${esc(version)} · 사례 revision ${envelope.caseRevision ?? '-'}. 최종 판단은 관할 소방서 확인이 필요합니다.</p>`;
 }
 
-function renderPlan(): string {
-  return `<figure class="plan__figure">${planSvg()}</figure>`;
-}
-
 export function mountPanel(root: HTMLElement, actions: AppActions): Component {
   root.innerHTML = `
     <div class="panel__header">
@@ -168,6 +164,9 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
 
   let latest: import('../types').CaseView | undefined;
 
+  // 도면 탭은 캔버스를 유지해야 하므로 HTML 문자열이 아니라 요소를 그대로 붙인다
+  const planView = FEATURES.planPanel ? createPlanView() : null;
+
   let lastHtml = '';
   let lastTab: PanelTab | null = null;
 
@@ -184,10 +183,14 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       const envelope = selectedAnswer(state)?.envelope ?? null;
       const conv = state.conversations.find((c) => c.id === state.activeConversationId);
       latest = conv?.caseId ? state.cases[conv.caseId] ?? { data: null, state: 'loading', message: null } : undefined;
+      if (tab === 'plan' && planView) {
+        if (body.firstElementChild !== planView.el) body.replaceChildren(planView.el);
+        lastHtml = '';
+        lastTab = tab;
+        return;
+      }
       const html =
-        tab === 'plan'
-          ? renderPlan()
-          : tab === 'check'
+        tab === 'check'
             ? renderCaseCard(latest, state.fieldDefs, conv !== undefined) + (latest ? '' : renderChecks(envelope))
             : state.sourceView
               ? renderSourceView(state.sourceView)
