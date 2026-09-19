@@ -1800,3 +1800,53 @@
 .plan3d__advanced .plan3d__note {
   margin-top: var(--space-2);
 }
+
+/* 조건 입력: 기본 → 더 필요한 항목 → 접어 둔 나머지 (UX-005) */
+.case__group--needed {
+  border-color: var(--accent);
+}
+
+.case__more {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+}
+
+.case__more > summary {
+  cursor: pointer;
+  font: var(--text-caption);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.case__more[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+.case__confirmed,
+.case__asks {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+  font: var(--text-body-sm);
+}
+
+.case__confirmed li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.case__confirmed li > span:first-child {
+  color: var(--ink-muted);
+}
+
+.case__asks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}

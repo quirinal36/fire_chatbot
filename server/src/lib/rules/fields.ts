@@ -178,7 +178,12 @@ export function toFacts(fields: CaseFields): Facts {
   return facts;
 }
 
-export function questionsFor(missing: readonly string[]): { field: string; question: string }[] {
+/**
+ * 모르는 항목을 사용자가 답할 수 있는 질문으로 바꾼다.
+ * `known` 은 이미 사용자가 확인해 준 항목이다. 파생값(use_class 등)이 모자랄 때 그 원천을 물을 때
+ * 이미 답한 것까지 다시 물으면 "아까 말했는데" 가 된다.
+ */
+export function questionsFor(missing: readonly string[], known?: ReadonlySet<string>): { field: string; question: string }[] {
   const seen = new Set<string>();
   const out: { field: string; question: string }[] = [];
   for (const m of missing) {
@@ -192,7 +197,7 @@ export function questionsFor(missing: readonly string[]): { field: string; quest
             ? ['building_floors_above', 'building_floors_below']
             : [m];
     for (const s of sources) {
-      if (seen.has(s) || !(s in FIELDS)) continue;
+      if (seen.has(s) || known?.has(s) || !(s in FIELDS)) continue;
       seen.add(s);
       out.push({ field: s, question: FIELDS[s as FieldKey].question });
     }

@@ -145,6 +145,14 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       actions.openSource(el.dataset['source'] ?? '');
     },
     'close-source': () => actions.closeSource(),
+    'focus-field': (el) => {
+      // 되묻기에서 바로 그 입력칸으로 보낸다. 접혀 있으면 펼친다
+      const key = el.dataset['key'] ?? '';
+      const target = body.querySelector<HTMLElement>(`#case-${CSS.escape(key)}`);
+      target?.closest('details')?.setAttribute('open', '');
+      target?.scrollIntoView({ block: 'center' });
+      target?.focus();
+    },
     expand: () => actions.setPanelExpanded(!expanded),
     'start-case': () => actions.startCase(),
     'reload-case': () => actions.reloadCase(),
@@ -174,6 +182,8 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
   let lastTab: PanelTab | null = null;
   /** 도면 작업 공간을 넓혀 둔 상태인가. 버튼이 켜기·되돌리기를 겸한다 */
   let expanded = false;
+  /** 첫 입력으로 포커스를 옮겨 준 사례. 같은 사례에서 다시 옮기면 입력 중에 커서가 튄다 */
+  let focusedCase: string | null = null;
 
   return {
     update(state) {
@@ -214,6 +224,11 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
         body.innerHTML = html;
         body.scrollTop = keepScroll ? top : 0;
         lastHtml = html;
+        // 조건 입력에 들어오면 결과를 지나쳐 스크롤하지 않고 바로 첫 질문에 답할 수 있어야 한다
+        if (tab === 'check' && latest?.data && focusedCase !== latest.data.id) {
+          focusedCase = latest.data.id;
+          body.querySelector<HTMLSelectElement | HTMLInputElement>('.case__form select, .case__form input')?.focus();
+        }
       }
       lastTab = tab;
     },

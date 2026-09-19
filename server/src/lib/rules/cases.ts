@@ -168,9 +168,15 @@ export function computeAssessment(row: CaseRow, active: ActiveRuleSet | null): C
       const spec = FIELDS[u.field as FieldKey] as { label: string; unit?: string };
       return { field: u.field, question: `${spec.label}: ${String(u.value)}${spec.unit ?? ''}(질문에서 읽은 값)이 맞나요?` };
     });
+  // 이미 확인한 값은 다시 묻지 않는다. 파생값의 원천을 물을 때도 마찬가지다
+  const known = new Set(
+    Object.entries(row.fields)
+      .filter(([, f]) => f.state === 'user_confirmed' && f.value !== null && f.value !== undefined)
+      .map(([k]) => k),
+  );
   const questions = [
     ...confirmQs,
-    ...questionsFor(missing).filter((q) => !pending.has(q.field)),
+    ...questionsFor(missing, known).filter((q) => !pending.has(q.field)),
   ];
   return {
     ruleSet: { id: active.id, version: active.version, status: active.status, preview: active.preview },
@@ -198,6 +204,9 @@ export async function assessCase(db: SupabaseClient, row: CaseRow): Promise<Case
 export function toEnvelopeAssessment(a: CaseAssessment): Assessment[] {
   if (!a.ruleSet) return [];
   const version = `${RULE_SET_CODE}@${a.ruleSet.version}${a.ruleSet.preview ? ' (검토 전 규칙)' : ''}`;
+  // 아직 묻고 있는 항목의 반대가 곧 답을 받은 항목이다 (판정에는 확인한 값만 쓰므로)
+  const asking = new Set([...a.questions.map((q) => q.field), ...a.unconfirmed.map((u) => u.field)]);
+  const answered: ReadonlySet<string> = new Set(Object.keys(FIELDS).filter((k) => !asking.has(k)));
   return a.results
     .filter((r) => r.ruleKey !== 'use_class')
     .map((r) => ({
@@ -206,7 +215,9 @@ export function toEnvelopeAssessment(a: CaseAssessment): Assessment[] {
       ruleId: `${a.ruleSet!.id}:${r.ruleKey}`,
       ruleSetVersion: version,
       explanation: r.explanation,
-      missingInputs: questionsFor(r.missingInputs).map((q) => FIELDS[q.field as FieldKey]?.label ?? q.field),
+      // 아직 답하지 않은 것만 남긴다. 확인한 값이 "필요한 정보" 로 다시 나오면 안 된다
+      missingInputs: questionsFor(r.missingInputs, answered)
+        .map((q) => FIELDS[q.field as FieldKey]?.label ?? q.field),
       sourceIds: r.sourceUnitIds,
     }));
 }
