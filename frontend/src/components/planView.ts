@@ -166,7 +166,7 @@ export function createPlanView(actions: AppActions): PlanView {
       </label>
       <label class="plan3d__field plan3d__field--check">
         <input type="checkbox" data-ctl="floor" checked>
-        <span>바닥에 원본 도면 깔기</span>
+        <span>원본 도면 표시</span>
       </label>
     </div>
     <div class="plan3d__areas" hidden></div>
@@ -239,6 +239,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const undo: Snapshot[] = [];
   let roomsTimer: ReturnType<typeof setTimeout> | null = null;
   let report: RoomReport | null = null;
+  let highlightedRoom: number | null = null;
   let scaleLinePx = 0;
   /** 계정에 저장된 도면 중 지금 열려 있는 것 */
   let currentPlan: { id: string; name: string } | null = null;
@@ -359,7 +360,9 @@ export function createPlanView(actions: AppActions): PlanView {
     if (!mask || !viewer) return;
     lastOpenings = findOpenings(mask, W(), H(), wallPx, pxPerMeter);
     report = findRooms(mask, W(), H(), pxPerMeter, { barriers: barriersOf(lastOpenings) });
+    if (!report.rooms.some((room) => room.id === highlightedRoom)) highlightedRoom = null;
     viewer.setRooms(report.rooms, roomNames);
+    viewer.setHighlightedRoom(highlightedRoom);
     renderAreas();
   }
 
@@ -456,8 +459,8 @@ export function createPlanView(actions: AppActions): PlanView {
       },
     }[scaleStatus];
     const rows = report.rooms
-      .map((r, i) => `<li class="plan3d__room"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
-        <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area, approximate))}</span></li>`)
+      .map((r, i) => `<li><button type="button" class="plan3d__room" data-action="room-select" data-room="${r.id}" aria-pressed="${highlightedRoom === r.id}"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
+        <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area, approximate))}</span></button></li>`)
       .join('');
     areas.innerHTML = `
       <p class="plan3d__total">바닥 면적 <strong>${esc(fmtArea(report.floorArea, approximate))}</strong>
@@ -664,6 +667,12 @@ export function createPlanView(actions: AppActions): PlanView {
       setMode('add');
       say('수정할 도구를 선택한 뒤 도면에서 편집하세요.');
     },
+    'room-select': (b) => {
+      const id = Number(b.dataset['room']);
+      highlightedRoom = highlightedRoom === id ? null : id;
+      viewer?.setHighlightedRoom(highlightedRoom);
+      renderAreas();
+    },
     'review-apply': () => applyReview(),
     'review-close': () => { pendingReview = null; reviewBox.hidden = true; },
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
@@ -738,6 +747,7 @@ export function createPlanView(actions: AppActions): PlanView {
     pendingReview = null;
     reviewBox.hidden = true;
     report = null;
+    highlightedRoom = null;
     ctl.hidden = false;
     tools.hidden = false;
     saveBtn.disabled = false;
@@ -955,6 +965,7 @@ export function createPlanView(actions: AppActions): PlanView {
       sourceName = d.name;
       sourceKind = 'saved';
       recognitionConfirmed = false;
+      highlightedRoom = null;
       defaultTried = true;
       setMode('view');
       const v = await ensureViewer();

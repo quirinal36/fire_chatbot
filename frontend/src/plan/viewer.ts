@@ -19,6 +19,8 @@ export interface Viewer {
   setWalls(polygons: WallPolygon[]): void;
   /** 구역 바닥 색과 표. names 가 있으면 번호 대신 이름을 쓴다 */
   setRooms(rooms: Room[], names?: Readonly<Record<number, string>>): void;
+  /** 선택한 구역을 강조한다. null 이면 모두 같은 농도로 보인다 */
+  setHighlightedRoom(id: number | null): void;
   /** 창문 자리(픽셀 사각형). 아래엔 창턱, 위엔 유리를 세운다 */
   setWindows(rects: readonly Rect[]): void;
   /** 문 자리(픽셀 사각형). 문 높이 위로 인방을 남겨 문으로 보이게 한다 */
@@ -84,6 +86,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   let polygons: WallPolygon[] = [];
   let roomList: Room[] = [];
   let roomNames: Readonly<Record<number, string>> = {};
+  let highlightedRoom: number | null = null;
   let windowRects: readonly Rect[] = [];
   let doorRects: readonly Rect[] = [];
   let height = 2.7;
@@ -161,7 +164,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     }
   }
 
-  function labelSprite(text: string, hue: number): THREE.Sprite {
+  function labelSprite(text: string, hue: number, opacity = 1): THREE.Sprite {
     const c = document.createElement('canvas');
     c.width = 320;
     c.height = 96;
@@ -179,7 +182,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     }
     const tex = new T.CanvasTexture(c);
     tex.colorSpace = T.SRGBColorSpace;
-    const sprite = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false }));
+    const sprite = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity }));
     const wide = Math.max(0.8, fitRadius * 0.16);
     sprite.scale.set(wide, wide * 0.375, 1);
     return sprite;
@@ -189,8 +192,10 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     disposeGroup(rooms);
     roomList.forEach((room, i) => {
       const hue = ROOM_HUES[i % ROOM_HUES.length] ?? 0;
+      const selected = highlightedRoom === room.id;
+      const opacity = highlightedRoom === null ? 0.5 : selected ? 0.75 : 0.16;
       // 눕힌 면의 법선이 아래를 향하므로 양면으로 그려야 위에서 보인다
-      const mat = new T.MeshBasicMaterial({ color: new T.Color(`hsl(${hue}, 70%, 55%)`), transparent: true, opacity: 0.5, depthWrite: false, side: T.DoubleSide });
+      const mat = new T.MeshBasicMaterial({ color: new T.Color(`hsl(${hue}, 70%, 55%)`), transparent: true, opacity, depthWrite: false, side: T.DoubleSide });
       for (const p of room.polygons) {
         const geo = new T.ShapeGeometry(toShape(p));
         geo.rotateX(Math.PI / 2);
@@ -199,7 +204,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
         rooms.add(mesh);
       }
       const name = roomNames[room.id];
-      const label = labelSprite(`${name ?? room.id} · ${room.area.toFixed(1)}㎡`, hue);
+      const label = labelSprite(`${name ?? room.id} · ${room.area.toFixed(1)}㎡`, hue, highlightedRoom === null || selected ? 1 : 0.28);
       label.position.set(room.center[0] * s, 0.3, room.center[1] * s);
       rooms.add(label);
     });
@@ -328,6 +333,10 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     setRooms(next, names = {}) {
       roomList = next;
       roomNames = names;
+      buildRooms();
+    },
+    setHighlightedRoom(id) {
+      highlightedRoom = id;
       buildRooms();
     },
     setWindows(rects) {
