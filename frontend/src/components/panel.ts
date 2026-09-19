@@ -197,7 +197,9 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       // 넓히기는 도면 작업에만 뜻이 있다. 다른 탭에서는 버튼을 감춘다
       expanded = state.panelExpanded;
       expandBtn.hidden = tab !== 'plan';
-      expandBtn.textContent = expanded ? '이전 화면으로' : '도면 크게 보기';
+      // 패널 머리글은 좁다. 탭 이름을 밀어내지 않게 짧게 쓰고, 무엇을 하는 버튼인지는 이름표로 남긴다
+      expandBtn.textContent = expanded ? '이전 화면' : '크게 보기';
+      expandBtn.setAttribute('aria-label', expanded ? '이전 화면으로 돌아가기' : '도면 크게 보기');
       expandBtn.setAttribute('aria-pressed', String(expanded));
       for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset['tab'] === tab));
 

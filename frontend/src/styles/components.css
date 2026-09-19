@@ -489,12 +489,15 @@
 
 .tabs {
   display: flex;
+  min-width: 0;
   gap: var(--space-1);
 }
 
 .tab {
   min-height: 36px;
   padding: 0 var(--space-3);
+  /* 좁은 패널에서 탭 이름이 한 글자씩 갈라지지 않게 한다 */
+  white-space: nowrap;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -515,11 +518,14 @@
 .panel__tools {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: var(--space-1);
 }
 
 .panel__expand {
   white-space: nowrap;
+  /* 탭 이름을 밀어내지 않게 좁은 패널에서는 글자를 줄인다 */
+  padding: 0 var(--space-2);
 }
 
 .panel__expand[aria-pressed='true'] {

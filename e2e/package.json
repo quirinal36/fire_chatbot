@@ -8,6 +8,8 @@
     "case": "./run-aside.sh case",
     "admin": "./run-aside.sh admin",
     "regression": "./run-aside.sh regression",
+    "plan-ux": "./run-aside.sh plan-ux",
+    "plan-layout": "./run-aside.sh plan-layout",
     "answer": "./run-aside.sh answer"
   }
 }

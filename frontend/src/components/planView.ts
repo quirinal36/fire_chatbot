@@ -324,21 +324,21 @@ export function createPlanView(actions: AppActions): PlanView {
 
     const scaleTitle = scaleDone ? '실제 길이 확인됨' : scaleDeferred ? '실제 길이 나중에 확인 · 면적은 추정' : '실제 길이 확인 필요';
     const steps = [
-      { n: 1, title: '도면 준비', state: 'done', extra: link('pick', '다른 도면 올리기') },
+      { n: 1, title: '도면 준비', state: 'done', extra: '' },
       {
         n: 2,
         title: scaleTitle,
         state: scaleDone ? 'done' : step === 2 ? 'current' : 'todo',
-        extra: scaleDone ? '' : `${link('scale-mode', '실제 길이 맞추기')} ${link('scale-read', '도면의 치수 자동 읽기')}`,
+        extra: '',
       },
       {
         n: 3,
         // 한 번 확인했더라도 그 뒤에 도면을 고쳤으면 그 확인은 지금 도면의 것이 아니다
         title: known ? '인식 결과 확인됨' : confirmedRev !== null ? '도면이 바뀜 · 인식 결과 다시 확인' : '인식 결과 확인 필요',
         state: known ? 'done' : step === 3 ? 'current' : 'todo',
-        extra: known ? '' : `벽과 문이 실제 도면과 같은가요? ${link('recognition-confirm', '맞아요')} ${link('recognition-edit', '수정하기')}`,
+        extra: known ? '' : '벽과 문이 실제 도면과 같은가요?',
       },
-      { n: 4, title: '소방시설 검토', state: step === 4 ? 'current' : 'todo', extra: link('open-case', '영업장 조건 입력하기') },
+      { n: 4, title: '소방시설 검토', state: step === 4 ? 'current' : 'todo', extra: '' },
     ];
 
     // 지금 할 일 하나. 나머지는 위 목록에 작은 글씨로 남는다
@@ -353,7 +353,8 @@ export function createPlanView(actions: AppActions): PlanView {
     journey.innerHTML = `<p class="plan3d__origin"><strong>${esc(origin)}</strong> · ${esc(sourceName)}</p>
       <ol class="plan3d__steps">
         ${steps
-          .map((x) => `<li class="${x.state === 'done' ? 'is-done' : x.state === 'current' ? 'is-current' : ''}">${x.n}. ${esc(x.title)}${x.extra ? ` ${x.extra}` : ''}</li>`)
+          // 할 일은 아래 한 줄에 모아 둔다. 단계마다 버튼을 달면 좁은 패널에서 목록이 길어져 도면이 화면 밖으로 밀린다
+          .map((x) => `<li class="${x.state === 'done' ? 'is-done' : x.state === 'current' ? 'is-current' : ''}">${x.n}. ${esc(x.title)}${x.state === 'current' && x.extra ? ` ${x.extra}` : ''}</li>`)
           .join('')}
       </ol>
       <p class="plan3d__todo"><span class="plan3d__todo-label">${esc(todoLabel)}</span>${todo}</p>`;
