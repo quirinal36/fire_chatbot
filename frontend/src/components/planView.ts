@@ -5,11 +5,11 @@
  */
 import { esc, must, onAction } from '../lib/dom';
 import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext, type ScaleStatus } from '../api/plans';
-import { ApiError } from '../api/client';
 import { cutOpening, DEFAULT_DARK, fillRect, labelComponents, nearestWall, paintWall, pointInPolygon, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import { decideImport, IMPORT_TARGETS, type AreaChoice } from '../plan/areaImport';
+import { describeFailure, failureInput, noScaleFound, type Failure, type RecoveryAction } from '../plan/failure';
 import type { EditHandlers, Viewer } from '../plan/viewer';
 import type { AppActions } from '../actions';
 import type { AppState } from '../types';
@@ -91,7 +91,7 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--quiet btn--compact" data-action="review" disabled>도면 인식 검토</button>
       </div>
       <p class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</p>
-      <div class="plan3d__recovery" hidden></div>
+      <div class="plan3d__recovery" role="group" aria-label="다음에 할 수 있는 일" hidden></div>
     </div>
     <div class="plan3d__journey" hidden aria-label="도면 검토 진행 상태"></div>
     <form class="plan3d__save" hidden>
@@ -205,6 +205,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const saveForm = must<HTMLFormElement>('.plan3d__save', el);
   const nameIn = must<HTMLInputElement>('[data-ctl="name"]', el);
   const updateBtn = must<HTMLButtonElement>('[data-save="update"]', el);
+  const createBtn = must<HTMLButtonElement>('[data-save="create"]', el);
   const savedBox = must<HTMLDivElement>('.plan3d__saved', el);
   const savedSel = must<HTMLSelectElement>('[data-ctl="saved"]', el);
   const modeBtns = Array.from(el.querySelectorAll<HTMLButtonElement>('[data-action="mode"]'));
@@ -245,6 +246,8 @@ export function createPlanView(actions: AppActions): PlanView {
   /** 계정에 저장된 도면 중 지금 열려 있는 것 */
   let currentPlan: { id: string; name: string } | null = null;
   let userId: string | null = null;
+  /** 정식 로그인 상태. 익명 세션은 false — 로그인이 한도를 올려 줄 때만 로그인을 권한다 */
+  let signedIn = false;
   let saved: PlanSummary[] = [];
   let busy = false;
   let retrySave: 'create' | 'update' | null = null;
@@ -280,6 +283,14 @@ export function createPlanView(actions: AppActions): PlanView {
   /** 도면을 새로 올릴 때마다 올라간다. 늦게 도착한 AI 검토 결과를 버리는 데 쓴다 */
   let planGen = 0;
 
+  /** 저장 중에는 버튼이 눌리지 않게 하고, 서버가 성공을 돌려주기 전에는 저장했다고 하지 않는다 */
+  function setSaving(on: boolean): void {
+    createBtn.disabled = on;
+    updateBtn.disabled = on;
+    createBtn.textContent = on ? '저장 중…' : '새로 저장';
+    updateBtn.textContent = on ? '저장 중…' : '덮어쓰기';
+  }
+
   function say(text: string, tone: 'info' | 'error' = 'info'): void {
     status.textContent = text;
     status.classList.toggle('tone-flag', tone === 'error');
@@ -287,16 +298,21 @@ export function createPlanView(actions: AppActions): PlanView {
     recovery.hidden = true;
   }
 
-  function offerRecovery(text: string, actions: readonly ('scale-mode' | 'scale-retry' | 'login' | 'save-retry')[]): void {
-    say(text, 'error');
-    const labels = {
-      'scale-mode': '직접 길이 입력',
-      'scale-retry': '다시 시도',
-      login: '로그인',
-      'save-retry': '다시 저장',
-    } as const;
-    recovery.innerHTML = actions.map((action) => `<button type="button" class="btn btn--quiet btn--compact" data-action="${action}">${labels[action]}</button>`).join('');
-    recovery.hidden = false;
+  const RECOVERY_LABEL: Record<RecoveryAction, string> = {
+    'scale-mode': '직접 길이 입력',
+    'scale-retry': '다시 읽기',
+    'review-retry': '다시 검토',
+    login: '로그인',
+    'save-retry': '다시 저장',
+  };
+
+  /** 실패 안내와 복구 버튼을 같은 자리에 놓는다. 포커스는 옮기지 않는다 — 하던 일을 끊지 않기 위해서다 */
+  function offerRecovery(failure: Failure): void {
+    say(failure.message, 'error');
+    recovery.innerHTML = failure.actions
+      .map((action) => `<button type="button" class="btn btn--quiet btn--compact" data-action="${action}">${RECOVERY_LABEL[action]}</button>`)
+      .join('');
+    recovery.hidden = failure.actions.length === 0;
   }
 
   function renderJourney(): void {
@@ -756,6 +772,7 @@ export function createPlanView(actions: AppActions): PlanView {
     'scale-read': () => void runScaleRead(),
     'scale-mode': () => setMode('scale'),
     'scale-retry': () => void runScaleRead(),
+    'review-retry': () => void runReview(),
     login: () => actions.openLogin(),
     'save-retry': () => { if (retrySave) void save(retrySave); },
     'scale-confirm': () => {
@@ -986,7 +1003,8 @@ export function createPlanView(actions: AppActions): PlanView {
     const name = nameIn.value.trim();
     if (!name || busy) return;
     busy = true;
-    say('저장하는 중…');
+    setSaving(true);
+    say(`“${name}” 으로 저장하는 중…`);
     try {
       const body = await payload(name);
       const detail = mode === 'update' && currentPlan ? await updatePlan(currentPlan.id, body) : await createPlan(body);
@@ -997,10 +1015,12 @@ export function createPlanView(actions: AppActions): PlanView {
       retrySave = null;
       say(`"${detail.name}" 으로 저장했습니다.`);
     } catch (err) {
+      console.warn('[plan] 도면 저장 실패', err);
       retrySave = mode;
-      offerRecovery(`저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, ['save-retry']);
+      offerRecovery(describeFailure('save', failureInput(err), signedIn));
     } finally {
       busy = false;
+      setSaving(false);
     }
   }
 
@@ -1248,7 +1268,7 @@ export function createPlanView(actions: AppActions): PlanView {
       if (!res.estimate && !res.guess) {
         // 자동 호출은 조용히 넘어가지만, 왜 못 읽었는지는 남겨야 원인을 찾을 수 있다
         console.warn('[plan] 치수 읽기: 쓸 만한 치수가 없음', res.note);
-        if (!opts.auto) offerRecovery(`자동 치수 읽기를 완료하지 못했습니다. 직접 길이를 입력해 계속할 수 있습니다. (${res.note})`, ['scale-mode', 'scale-retry']);
+        if (!opts.auto) offerRecovery(noScaleFound(res.note));
         return;
       }
       // 보낸 그림 기준 축척을 마스크 기준으로 되돌린다
@@ -1271,15 +1291,7 @@ export function createPlanView(actions: AppActions): PlanView {
     } catch (err) {
       console.warn('[plan] 치수 읽기 실패', err);
       if (gen !== planGen || opts.auto) return;
-      if (err instanceof ApiError && err.code === 'rate_limited') {
-        offerRecovery('자동 치수 읽기 이용 한도에 도달했습니다. 직접 길이를 입력해 계속할 수 있습니다.', ['scale-mode']);
-      } else if (err instanceof ApiError && err.code === 'budget_exhausted') {
-        offerRecovery('오늘 자동 치수 읽기에 쓸 수 있는 이용량이 모두 소진되었습니다. 직접 길이를 입력해 계속할 수 있습니다.', ['scale-mode']);
-      } else if (err instanceof ApiError && err.code === 'network') {
-        offerRecovery('자동 치수 읽기를 위해 서버에 연결하지 못했습니다. 연결을 확인한 뒤 다시 시도하거나 직접 길이를 입력하세요.', ['scale-retry', 'scale-mode']);
-      } else {
-        offerRecovery(`자동 치수 읽기를 완료하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, ['scale-retry', 'scale-mode']);
-      }
+      offerRecovery(describeFailure('scale', failureInput(err), signedIn));
     } finally {
       busy = false;
       scaleBtn.disabled = mask === null;
@@ -1323,7 +1335,8 @@ export function createPlanView(actions: AppActions): PlanView {
       renderReview(pendingReview, res.model);
       say(`AI 검토가 끝났습니다 (품질 ${(rv.quality * 100).toFixed(0)}점). 적용할 제안을 골라 주세요.`);
     } catch (err) {
-      if (gen === planGen) say(`AI 검토에 실패했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      console.warn('[plan] AI 검토 실패', err);
+      if (gen === planGen) offerRecovery(describeFailure('review', failureInput(err), signedIn));
     } finally {
       busy = false;
       // 검토가 끝나면 다시 눌러 볼 수 있게 항상 되살린다
@@ -1552,6 +1565,7 @@ export function createPlanView(actions: AppActions): PlanView {
         }
         if (report) renderAreas();
       }
+      signedIn = state.user !== null && !state.user.anonymous;
       const next = state.user?.id ?? null;
       if (next === userId) return;
       userId = next;

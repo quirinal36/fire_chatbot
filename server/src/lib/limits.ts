@@ -27,12 +27,13 @@ export async function enforceLimits(db: SupabaseClient, user: User, ip: string):
     const { data: ok, error: quotaError } = await db.rpc('consume_request_quota', { p_scope: scope, p_limit: limit });
     if (quotaError) throw new Error(`한도 확인 실패: ${quotaError.message}`);
     if (ok !== true) {
+      // 로그인이 실제로 한도를 올려 주는 경우에만 다른 코드를 준다. 화면은 이때만 로그인을 권한다 —
+      // IP 한도에 걸린 것이라면 로그인해도 그대로다. 한도는 질문·도면 작업이 함께 쓰므로 문구는 작업을 가리지 않는다
+      const loginHelps = user.is_anonymous && scope.startsWith('user:');
       throw new HttpError(
         429,
-        'rate_limited',
-        user.is_anonymous && scope.startsWith('user:')
-          ? '오늘 질문 한도에 도달했습니다. 로그인하면 더 질문할 수 있습니다.'
-          : '오늘 질문 한도에 도달했습니다.',
+        loginHelps ? 'rate_limited_anon' : 'rate_limited',
+        loginHelps ? '오늘 이용 한도에 도달했습니다. 로그인하면 더 이용할 수 있습니다.' : '오늘 이용 한도에 도달했습니다.',
       );
     }
   }
