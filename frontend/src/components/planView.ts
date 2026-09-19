@@ -69,10 +69,10 @@ export function createPlanView(actions: AppActions): PlanView {
     <div class="plan3d__bar">
       <div class="plan3d__file-tools" aria-label="도면 파일과 분석 도구">
         <label class="btn btn--compact plan3d__upload">
-          도면 올리기
+          내 도면 올리기
           <input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" aria-label="도면 이미지 선택">
         </label>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="default">예시 도면</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="default">예시 도면으로 체험하기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="scale-read" disabled>도면의 치수 자동 읽기</button>
       </div>
@@ -143,19 +143,22 @@ export function createPlanView(actions: AppActions): PlanView {
     <div class="plan3d__stage" data-empty="true">
       <p class="plan3d__hint">이미지를 여기에 끌어다 놓아도 됩니다.<br>도면은 서버로 보내지 않고 이 브라우저 안에서만 처리합니다.</p>
     </div>
-    <div class="plan3d__ctl" hidden>
-      <label class="plan3d__field">
-        <span>벽 높이 <output data-out="height">2.7</output> m</span>
-        <input type="range" data-ctl="height" min="0.3" max="4" step="0.1" value="2.7">
-      </label>
-      <label class="plan3d__field">
-        <span>벽 두께 기준 <output data-out="thick">-</output> px</span>
-        <input type="range" data-ctl="thick" min="2" max="40" step="1" value="8">
-      </label>
-    </div>
+    <details class="plan3d__advanced" hidden>
+      <summary>인식 결과 조정</summary>
+      <div class="plan3d__ctl">
+        <label class="plan3d__field">
+          <span>벽 높이 <output data-out="height">2.7</output> m</span>
+          <input type="range" data-ctl="height" min="0.3" max="4" step="0.1" value="2.7">
+        </label>
+        <label class="plan3d__field">
+          <span>벽 인식 기준 <output data-out="thick">-</output> px</span>
+          <input type="range" data-ctl="thick" min="2" max="40" step="1" value="8">
+        </label>
+      </div>
+      <p class="plan3d__note">이 굵기(px) 이상인 검은 선만 벽으로 봅니다. 가구·글자가 벽으로 잡히면 올리고, 얇은 벽이 빠지면 내리세요.
+        벽이 끊긴 자리가 출입구·창문입니다. 벽 높이는 3D 로 세울 때만 씁니다.</p>
+    </details>
     <div class="plan3d__areas" hidden></div>
-    <p class="plan3d__note">두꺼운 검은 선만 벽으로 봅니다. 가구·글자가 벽으로 잡히거나 벽이 빠지면 벽 두께 기준을 조절하세요.
-      벽이 끊긴 자리가 출입구·창문입니다. 축척을 맞추기 전에는 벽 두께 ${ASSUMED_WALL_M}m 로 가정합니다.</p>
   `;
 
   const input = must<HTMLInputElement>('input[type="file"]', el);
@@ -168,7 +171,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const doorBox = must<HTMLDivElement>('.plan3d__door', el);
   const scaleForm = must<HTMLFormElement>('.plan3d__scale', el);
   const stage = must<HTMLDivElement>('.plan3d__stage', el);
-  const ctl = must<HTMLDivElement>('.plan3d__ctl', el);
+  const advanced = must<HTMLDetailsElement>('.plan3d__advanced', el);
   const areas = must<HTMLDivElement>('.plan3d__areas', el);
   const heightIn = must<HTMLInputElement>('[data-ctl="height"]', el);
   const thickIn = must<HTMLInputElement>('[data-ctl="thick"]', el);
@@ -244,7 +247,10 @@ export function createPlanView(actions: AppActions): PlanView {
   let lastOpenings: Opening[] = [];
   /** 벽·축척이 바뀔 때마다 올라간다. 늦게 도착한 치수 읽기 결과를 버리는 데 쓴다 */
   let rev = 0;
-  let recognitionConfirmed = false;
+  /** 인식 결과를 확인해 준 시점의 rev. 벽·축척이 바뀌면 rev 가 올라가 확인이 풀린다 */
+  let confirmedRev: number | null = null;
+  /** 실제 길이 확인을 나중으로 미뤘는가. 추정 상태는 그대로 두고 다음 단계로 넘어가게만 한다 */
+  let scaleDeferred = false;
   /** 보는 방식. 도면은 평면으로 연다 — 입체 벽은 원본·치수·구역을 가린다 */
   let viewMode: ViewMode = 'plan';
   /** 원본 도면을 바닥에 깔아 둘 것인가 */
@@ -294,18 +300,63 @@ export function createPlanView(actions: AppActions): PlanView {
     recovery.hidden = failure.actions.length === 0;
   }
 
+  /** 인식 결과 확인이 지금 도면에 대한 것인가. 벽이나 축척을 바꾸면 풀린다 */
+  function recognitionConfirmed(): boolean {
+    return confirmedRev === rev;
+  }
+
+  /**
+   * 준비 → 실제 길이 → 인식 결과 → 소방시설 검토. 지금 어느 단계이고 무엇을 하면 되는지 한 곳에서 보여 준다.
+   * 주 행동은 하나만 강조한다. 여러 개를 같은 크기로 늘어놓으면 처음 쓰는 사람이 무엇부터 할지 고르지 못한다.
+   */
   function renderJourney(): void {
     if (!pixels || sourceKind === null) { journey.hidden = true; return; }
     journey.hidden = false;
     const origin = sourceKind === 'sample' ? '예시 도면' : sourceKind === 'saved' ? '저장한 도면' : '내 도면';
     const scaleDone = scaleStatus === 'confirmed';
+    const known = recognitionConfirmed();
+    // 지금 단계: 길이를 미뤘으면 인식 확인으로 넘어가되 2단계는 확인됨으로 치지 않는다
+    const step = !scaleDone && !scaleDeferred ? 2 : !known ? 3 : 4;
+    const link = (action: string, label: string): string =>
+      `<button type="button" class="link" data-action="${action}">${esc(label)}</button>`;
+    const primary = (action: string, label: string): string =>
+      `<button type="button" class="btn btn--accent btn--compact" data-action="${action}">${esc(label)}</button>`;
+
+    const scaleTitle = scaleDone ? '실제 길이 확인됨' : scaleDeferred ? '실제 길이 나중에 확인 · 면적은 추정' : '실제 길이 확인 필요';
+    const steps = [
+      { n: 1, title: '도면 준비', state: 'done', extra: link('pick', '다른 도면 올리기') },
+      {
+        n: 2,
+        title: scaleTitle,
+        state: scaleDone ? 'done' : step === 2 ? 'current' : 'todo',
+        extra: scaleDone ? '' : `${link('scale-mode', '실제 길이 맞추기')} ${link('scale-read', '도면의 치수 자동 읽기')}`,
+      },
+      {
+        n: 3,
+        // 한 번 확인했더라도 그 뒤에 도면을 고쳤으면 그 확인은 지금 도면의 것이 아니다
+        title: known ? '인식 결과 확인됨' : confirmedRev !== null ? '도면이 바뀜 · 인식 결과 다시 확인' : '인식 결과 확인 필요',
+        state: known ? 'done' : step === 3 ? 'current' : 'todo',
+        extra: known ? '' : `벽과 문이 실제 도면과 같은가요? ${link('recognition-confirm', '맞아요')} ${link('recognition-edit', '수정하기')}`,
+      },
+      { n: 4, title: '소방시설 검토', state: step === 4 ? 'current' : 'todo', extra: link('open-case', '영업장 조건 입력하기') },
+    ];
+
+    // 지금 할 일 하나. 나머지는 위 목록에 작은 글씨로 남는다
+    const todo =
+      step === 2
+        ? `${primary('scale-mode', '실제 길이 맞추기')} ${link('scale-read', '도면의 치수를 자동으로 읽기')} ${link('scale-later', '길이를 몰라요 · 나중에 확인')}`
+        : step === 3
+          ? `${primary('recognition-confirm', '벽과 문이 도면과 같아요')} ${link('recognition-edit', '고칠 곳이 있어요')}`
+          : `${primary('open-case', '영업장 조건 입력하기')}`;
+    const todoLabel = step === 2 ? '지금 할 일 · 면적을 맞추려면 실제 길이가 필요합니다' : step === 3 ? '지금 할 일 · 인식 결과 확인' : '지금 할 일 · 소방시설 검토';
+
     journey.innerHTML = `<p class="plan3d__origin"><strong>${esc(origin)}</strong> · ${esc(sourceName)}</p>
       <ol class="plan3d__steps">
-        <li class="is-done">1. 도면 준비</li>
-        <li class="${scaleDone ? 'is-done' : 'is-current'}">2. ${scaleDone ? '실제 길이 확인됨' : '실제 길이 확인 필요'}${scaleDone ? '' : ' <button type="button" class="link" data-action="scale-mode">실제 길이 맞추기</button>'}</li>
-        <li class="${recognitionConfirmed ? 'is-done' : scaleDone ? 'is-current' : ''}">3. ${recognitionConfirmed ? '인식 결과 확인됨' : '인식 결과 확인 필요'}${recognitionConfirmed ? '' : ' <button type="button" class="link" data-action="recognition-confirm">맞아요</button> <button type="button" class="link" data-action="recognition-edit">수정하기</button>'}</li>
-        <li class="${recognitionConfirmed && scaleDone ? 'is-current' : ''}">4. 소방시설 검토</li>
-      </ol>`;
+        ${steps
+          .map((x) => `<li class="${x.state === 'done' ? 'is-done' : x.state === 'current' ? 'is-current' : ''}">${x.n}. ${esc(x.title)}${x.extra ? ` ${x.extra}` : ''}</li>`)
+          .join('')}
+      </ol>
+      <p class="plan3d__todo"><span class="plan3d__todo-label">${esc(todoLabel)}</span>${todo}</p>`;
   }
 
   const W = (): number => pixels?.width ?? 0;
@@ -672,7 +723,8 @@ export function createPlanView(actions: AppActions): PlanView {
     },
     undo: () => popUndo(),
     'finish-edit': () => setMode('view'),
-    default: () => void loadDefault(true),
+    // 체험은 돈을 쓰지 않는다. 치수 자동 읽기는 사용자가 따로 누를 때만 부른다
+    default: () => void loadDefault(false),
     'save-open': () => {
       if (!mask) return;
       if (!userId) { actions.openLogin(); return; }
@@ -695,10 +747,16 @@ export function createPlanView(actions: AppActions): PlanView {
       say('자동으로 읽은 치수를 확인했습니다. 기준 길이는 언제든 수정할 수 있습니다.');
     },
     'recognition-confirm': () => {
-      recognitionConfirmed = true;
+      confirmedRev = rev;
       renderJourney();
-      say('도면 인식 결과를 확인했습니다. 벽이나 문을 바꾸면 다시 확인해 주세요.');
+      say('도면 인식 결과를 확인했습니다. 벽이나 실제 길이를 바꾸면 다시 확인해 주세요.');
     },
+    'scale-later': () => {
+      scaleDeferred = true;
+      renderJourney();
+      say('실제 길이 확인을 미뤘습니다. 면적은 추정값으로 남고, 영업장 조건에는 넣을 수 없습니다.');
+    },
+    pick: () => onPick(),
     'recognition-edit': () => {
       setMode('add');
       say('수정할 도구를 선택한 뒤 도면에서 편집하세요.');
@@ -779,13 +837,14 @@ export function createPlanView(actions: AppActions): PlanView {
     windowRects = [];
     doorRects = [];
     roomNames = {};
-    recognitionConfirmed = false;
+    confirmedRev = null;
+    scaleDeferred = false;
     v.setWindows([]);
     v.setDoors([]);
     // 마스크가 바뀌었으니 지난 방 목록은 버린다
     report = null;
     highlightedRoom = null;
-    ctl.hidden = false;
+    advanced.hidden = false;
     tools.hidden = false;
     saveBtn.disabled = false;
     scaleBtn.disabled = false;
@@ -985,7 +1044,8 @@ export function createPlanView(actions: AppActions): PlanView {
       currentPlan = { id: d.id, name: d.name };
       sourceName = d.name;
       sourceKind = 'saved';
-      recognitionConfirmed = false;
+      confirmedRev = null;
+      scaleDeferred = false;
       highlightedRoom = null;
       defaultTried = true;
       setMode('view');
@@ -999,7 +1059,7 @@ export function createPlanView(actions: AppActions): PlanView {
       roomNames = ann.roomNames;
       v.setWindows(windowRects);
       v.setDoors(doorRects);
-      ctl.hidden = false;
+      advanced.hidden = false;
       tools.hidden = false;
       saveBtn.disabled = false;
       scaleBtn.disabled = false;

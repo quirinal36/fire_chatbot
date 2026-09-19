@@ -1761,3 +1761,42 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* 진행 단계의 "지금 할 일" — 주 행동 하나만 크게 (UX-003) */
+.plan3d__todo {
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--text-micro);
+}
+
+.plan3d__todo-label {
+  flex: 1 1 100%;
+  color: var(--ink-muted);
+}
+
+/* 고급 설정은 접어 둔다. 필요한 사람만 펼친다 */
+.plan3d__advanced {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.plan3d__advanced > summary {
+  cursor: pointer;
+  font: var(--text-body-sm);
+  color: var(--ink-muted);
+}
+
+.plan3d__advanced[open] > summary {
+  margin-bottom: var(--space-2);
+  color: var(--ink);
+}
+
+.plan3d__advanced .plan3d__note {
+  margin-top: var(--space-2);
+}
