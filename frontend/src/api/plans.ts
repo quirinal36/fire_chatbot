@@ -82,7 +82,7 @@ export interface ReviewContext {
   readonly round: number;
   readonly grid: { readonly cols: number; readonly rows: number };
   readonly params: { readonly dark: number; readonly wallPx: number; readonly pxPerMeter: number };
-  readonly openings: readonly { id: number; widthM: number; cell: string }[];
+  readonly openings: readonly { id: number; widthM: number; cell: string; between: readonly number[] }[];
   readonly rooms: readonly { id: number; areaM2: number; cell: string }[];
 }
 

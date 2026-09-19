@@ -364,7 +364,7 @@ export function signedArea(pts: readonly Pt[]): number {
   return s / 2;
 }
 
-function pointInPolygon(p: Pt, poly: readonly Pt[]): boolean {
+export function pointInPolygon(p: Pt, poly: readonly Pt[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i] as Pt;

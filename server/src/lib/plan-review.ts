@@ -24,7 +24,17 @@ export const contextSchema = z.object({
   grid: z.object({ cols: z.number().int().min(2).max(26), rows: z.number().int().min(2).max(40) }),
   /** 지금 쓴 매개변수 */
   params: z.object({ dark: z.number().int().min(0).max(255), wallPx: z.number().int().min(1).max(256), pxPerMeter: z.number().positive() }),
-  openings: z.array(z.object({ id: z.number().int().min(1), widthM: z.number().nonnegative(), cell: z.string().max(4) })).max(120),
+  openings: z
+    .array(
+      z.object({
+        id: z.number().int().min(1),
+        widthM: z.number().nonnegative(),
+        cell: z.string().max(4),
+        /** 후보 양쪽의 구역 번호 (0~2개). 같은 번호면 지금은 나뉘지 않은 것이다 */
+        between: z.array(z.number().int().min(1)).max(2).default([]),
+      }),
+    )
+    .max(120),
   rooms: z.array(z.object({ id: z.number().int().min(1), areaM2: z.number().nonnegative(), cell: z.string().max(4) })).max(60),
 });
 export type ReviewContext = z.infer<typeof contextSchema>;
@@ -119,7 +129,7 @@ export const REVIEW_JSON_SCHEMA = {
 export function buildPrompt(ctx: ReviewContext, imageWidth: number, imageHeight: number): string {
   const cols = Array.from({ length: ctx.grid.cols }, (_, i) => String.fromCharCode(65 + i)).join('');
   const openings = ctx.openings.length
-    ? ctx.openings.map((o) => `${o.id}: ${o.cell} 칸, 폭 ${o.widthM.toFixed(1)}m`).join('; ')
+    ? ctx.openings.map((o) => `${o.id}: ${o.cell} 칸, 폭 ${o.widthM.toFixed(1)}m${o.between.length ? `, 구역 ${o.between.join('↔')} 사이` : ''}`).join('; ')
     : '없음';
   const rooms = ctx.rooms.length ? ctx.rooms.map((r) => `${r.id}: ${r.cell} 칸, ${r.areaM2.toFixed(1)}㎡`).join('; ') : '없음';
   return [
@@ -128,7 +138,7 @@ export function buildPrompt(ctx: ReviewContext, imageWidth: number, imageHeight:
     '파란 선분과 숫자는 벽이 끊긴 자리(개구부 후보), 초록 원과 숫자는 프로그램이 나눈 구역입니다.',
     '후보는 벽 끝에서 가까운 벽까지 그은 것이라, 실제 문·창 외에 트인 곳이나 개구부가 아닌 자리도 섞여 있습니다.',
     `그림 크기 ${imageWidth}×${imageHeight}px. 지금 매개변수: 어두움 기준 ${ctx.params.dark}, 벽 두께 ${ctx.params.wallPx}px, 1m 당 ${ctx.params.pxPerMeter.toFixed(1)}px (검토 ${ctx.round}회째).`,
-    `개구부 목록: ${openings}`,
+    `개구부 후보 목록 (양쪽 구역 번호를 함께 적었습니다. 같은 번호면 지금은 나뉘지 않은 것입니다): ${openings}`,
     `구역 목록: ${rooms}`,
     '',
     '다음을 JSON 으로 답하세요.',

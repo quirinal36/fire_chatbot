@@ -6,7 +6,7 @@
 import { esc, must, onAction } from '../lib/dom';
 import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext, type ScaleStatus } from '../api/plans';
 import { ApiError } from '../api/client';
-import { cutOpening, DEFAULT_DARK, fillRect, nearestWall, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
+import { cutOpening, DEFAULT_DARK, fillRect, labelComponents, nearestWall, paintWall, pointInPolygon, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import type { EditHandlers, Viewer } from '../plan/viewer';
@@ -30,6 +30,8 @@ const REVIEW_COLS = 12;
 const DEFAULT_SEAL_M = 1.3;
 /** AI 검토에 보내는 개구부 후보 최대 수 (서버 스키마와 같아야 한다) */
 const MAX_REVIEW_OPENINGS = 120;
+/** AI 가 제안한 빠진 벽은 원본에 어두운 선이 이 비율 이상 보여야 기본으로 고른다 */
+const MISSING_EVIDENCE = 0.6;
 
 /** 개구부 후보의 판정. 후보 번호는 마스크가 바뀌면 달라지므로 선분의 양 끝으로 기억한다 */
 type OpeningKind = 'door' | 'window' | 'open' | 'not_opening';
@@ -359,6 +361,72 @@ export function createPlanView(actions: AppActions): PlanView {
     report = findRooms(mask, W(), H(), pxPerMeter, { barriers: barriersOf(lastOpenings) });
     viewer.setRooms(report.rooms, roomNames);
     renderAreas();
+  }
+
+  /** 점이 어느 구역 안에 있는지. 구역 다각형의 바깥 테두리 안이고 구멍 밖이면 그 구역이다 */
+  function roomAt(p: Pt): number | null {
+    for (const room of report?.rooms ?? []) {
+      for (const poly of room.polygons) {
+        if (pointInPolygon(p, poly.outer) && !poly.holes.some((hole) => pointInPolygon(p, hole))) return room.id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 후보 양쪽의 구역 번호. 선분 가운데에서 직각 방향으로 벽 두께 두 배만큼 떨어진 두 점이 어느 구역인지 본다.
+   * AI 에 "구역 2↔3 사이" 로 알려 주면 문인지 트인 곳인지 판단이 쉬워진다. 같은 번호면 지금 나뉘지 않은 것이다.
+   */
+  function roomsBeside(o: Opening): number[] {
+    const mx = (o.a[0] + o.b[0]) / 2;
+    const my = (o.a[1] + o.b[1]) / 2;
+    const len = Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1]) || 1;
+    const nx = -(o.b[1] - o.a[1]) / len;
+    const ny = (o.b[0] - o.a[0]) / len;
+    const d = wallPx * 2 + 2;
+    const out: number[] = [];
+    for (const sign of [1, -1]) {
+      const id = roomAt([mx + nx * d * sign, my + ny * d * sign]);
+      if (id !== null) out.push(id);
+    }
+    return out;
+  }
+
+  /** AI 가 준 빠진 벽 양 끝을 기존 벽에 붙인다. 너무 짧으면 null */
+  function snapMissing(m: { from: { x: number; y: number }; to: { x: number; y: number } }, base: Uint8Array): [Pt, Pt] | null {
+    const reach = wallPx * 2;
+    const a = nearestWall(base, W(), H(), [m.from.x * W(), m.from.y * H()], reach);
+    const b = nearestWall(base, W(), H(), snapToAxis(a, [m.to.x * W(), m.to.y * H()]), reach);
+    return Math.hypot(b[0] - a[0], b[1] - a[1]) < 2 ? null : [a, b];
+  }
+
+  /**
+   * 선분을 따라 원본에 어두운 선이 있는 비율. 시각 모델은 없는 벽을 지어내기도 하므로(없는 대상 거부율이
+   * 거의 0 인 벤치마크가 있다) 원본 증거가 없는 제안은 기본으로 고르지 않는다. 선 근처 ±3px 를 본다.
+   */
+  function darkEvidence(a: Pt, b: Pt): number {
+    if (!pixels) return 0;
+    const dark = userDark ?? DEFAULT_DARK;
+    const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
+    const len = n || 1;
+    const nx = -(b[1] - a[1]) / len;
+    const ny = (b[0] - a[0]) / len;
+    let hit = 0;
+    for (let i = 0; i <= n; i++) {
+      const cx = a[0] + ((b[0] - a[0]) * i) / n;
+      const cy = a[1] + ((b[1] - a[1]) * i) / n;
+      let found = false;
+      for (let k = -3; k <= 3 && !found; k++) {
+        const x = Math.round(cx + nx * k);
+        const y = Math.round(cy + ny * k);
+        if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
+        const p = (y * W() + x) * 4;
+        const lum = (299 * (pixels.data[p] ?? 255) + 587 * (pixels.data[p + 1] ?? 255) + 114 * (pixels.data[p + 2] ?? 255)) / 1000;
+        if (lum < dark) found = true;
+      }
+      if (found) hit++;
+    }
+    return hit / (n + 1);
   }
 
   function renderAreas(): void {
@@ -1116,7 +1184,7 @@ export function createPlanView(actions: AppActions): PlanView {
         round: 1,
         grid: { cols: g.cols, rows: g.rows },
         params: { dark: userDark ?? DEFAULT_DARK, wallPx, pxPerMeter: pxPerMeter * scale },
-        openings: openings.map((o) => ({ id: o.id, widthM: o.widthM, cell: cellOf([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2]) })),
+        openings: openings.map((o) => ({ id: o.id, widthM: o.widthM, cell: cellOf([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2]), between: roomsBeside(o) })),
         rooms: (report?.rooms ?? []).map((r) => ({ id: r.id, areaM2: r.area, cell: cellOf(r.center) })),
       };
       const image = await toBlob(canvas, 'image/jpeg', 0.85);
@@ -1148,8 +1216,14 @@ export function createPlanView(actions: AppActions): PlanView {
     const items: string[] = [];
     const item = (kind: string, idx: number, text: string, checked = true): string =>
       `<li><label><input type="checkbox" data-kind="${kind}" data-idx="${idx}" ${checked ? 'checked' : ''}> ${esc(text)}</label></li>`;
-    rv.falseWalls.forEach((f, i) => items.push(item('false', i, `${f.cell} 칸의 벽 지우기 (${f.what})`)));
-    rv.missingWalls.forEach((m, i) => items.push(item('missing', i, `벽 추가: (${m.from.x.toFixed(2)}, ${m.from.y.toFixed(2)}) → (${m.to.x.toFixed(2)}, ${m.to.y.toFixed(2)}) ${m.why}`)));
+    rv.falseWalls.forEach((f, i) => items.push(item('false', i, `${f.cell} 칸에서 주 벽에 붙지 않은 조각 지우기 (${f.what})`)));
+    rv.missingWalls.forEach((m, i) => {
+      const seg = mask ? snapMissing(m, mask) : null;
+      const evidence = seg ? darkEvidence(seg[0], seg[1]) : 0;
+      const ok = evidence >= MISSING_EVIDENCE;
+      const len = seg ? (Math.hypot(seg[1][0] - seg[0][0], seg[1][1] - seg[0][1]) / pxPerMeter).toFixed(1) : '?';
+      items.push(item('missing', i, `벽 추가 ${len}m: ${m.why}${ok ? '' : ` — 원본에 선이 ${(evidence * 100).toFixed(0)}% 만 보여 확인이 필요합니다`}`, ok));
+    });
     const KIND_TEXT: Record<OpeningKind, string> = {
       door: '문 — 방을 나누고 3D 에 인방을 남김',
       window: '창문 — 방을 나누고 창턱·유리를 세움',
@@ -1209,19 +1283,29 @@ export function createPlanView(actions: AppActions): PlanView {
     pushUndo();
     const before = mask.slice();
     let maskChanged = false;
-    rv.falseWalls.forEach((f, i) => {
-      if (!has('false', i) || !mask) return;
-      const r = rectOfCell(f.cell);
-      if (r) { fillRect(mask, W(), H(), r, 0); maskChanged = true; }
-    });
+    if (rv.falseWalls.some((_, i) => has('false', i))) {
+      // 칸째 지우되 주 벽 네트워크(가장 큰 덩어리)는 남긴다. 가구·글자는 대개 따로 떨어진 덩어리다.
+      // 진짜 벽이 같은 칸에 있어도 지워지지 않고, 벽에 붙은 가구는 안 지워지는 쪽으로 틀린다 (사용자가 지우면 된다)
+      const { labels, areas } = labelComponents(before, W(), H());
+      let mainId = 0;
+      for (let id = 1; id < areas.length; id++) if ((areas[id] ?? 0) > (areas[mainId] ?? 0)) mainId = id;
+      rv.falseWalls.forEach((f, i) => {
+        if (!has('false', i) || !mask) return;
+        const r = rectOfCell(f.cell);
+        if (!r) return;
+        for (let y = Math.max(0, Math.floor(r.y0)); y < Math.min(H(), Math.ceil(r.y1)); y++) {
+          for (let x = Math.max(0, Math.floor(r.x0)); x < Math.min(W(), Math.ceil(r.x1)); x++) {
+            const i2 = y * W() + x;
+            if (mask[i2] && labels[i2] !== mainId) { mask[i2] = 0; maskChanged = true; }
+          }
+        }
+      });
+    }
     rv.missingWalls.forEach((m, i) => {
       if (!has('missing', i) || !mask) return;
-      const reach = wallPx * 2;
-      const a = nearestWall(before, W(), H(), [m.from.x * W(), m.from.y * H()], reach);
-      const b0: Pt = [m.to.x * W(), m.to.y * H()];
-      const b = nearestWall(before, W(), H(), snapToAxis(a, b0), reach);
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2) return;
-      paintWall(mask, W(), H(), a, b, wallPx);
+      const seg = snapMissing(m, before);
+      if (!seg) return;
+      paintWall(mask, W(), H(), seg[0], seg[1], wallPx);
       maskChanged = true;
     });
     const sameRect = (r: Rect, q: Rect): boolean => r.x0 === q.x0 && r.y0 === q.y0 && r.x1 === q.x1 && r.y1 === q.y1;
