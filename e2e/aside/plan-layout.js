@@ -16,7 +16,7 @@ const out = './artifacts/__NAME__';
 const base = '__BASE__';
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok, detail: detail || '' });
-const MODES = ['view', 'add', 'erase', 'door', 'scale'];
+const MODES = ['view', 'add', 'erase', 'door', 'window', 'scale'];
 
 async function waitUntil(fn, ms, what) {
   const until = Date.now() + ms;

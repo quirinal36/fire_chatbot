@@ -1574,7 +1574,8 @@
 
 .plan3d__edit,
 .plan3d__scale,
-.plan3d__door {
+.plan3d__door,
+.plan3d__window {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -1583,6 +1584,7 @@
 
 .plan3d__edit .plan3d__field,
 .plan3d__door .plan3d__field,
+.plan3d__window .plan3d__field,
 .plan3d__scale .plan3d__field {
   flex: 1 1 12rem;
 }

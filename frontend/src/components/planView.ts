@@ -5,8 +5,8 @@
  */
 import { esc, must, onAction } from '../lib/dom';
 import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, updatePlan, type PlanSummary, type ScaleStatus } from '../api/plans';
-import { cutOpening, fillRect, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
-import { findRooms, roomLabel, type Barrier, type RoomReport } from '../plan/rooms';
+import { fillRect, MAX_GAP_M, paintWall, placeOpening, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type PlacedOpening, type Pt, type Rect } from '../plan/walls';
+import { barrierOfRect, findRooms, roomLabel, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import { decideImport, IMPORT_TARGETS, type AreaChoice } from '../plan/areaImport';
 import { describeFailure, failureInput, noScaleFound, type Failure, type RecoveryAction } from '../plan/failure';
@@ -20,6 +20,10 @@ const MAX_SIDE = 1600;
 const ASSUMED_WALL_M = 0.2;
 /** 문 기본 폭(m). 외여닫이문 유효폭 */
 const DEFAULT_DOOR_M = 0.9;
+/** 창 기본 폭(m). 주거 침실 창 정도 */
+const DEFAULT_WINDOW_M = 1.5;
+/** 사용자가 놓는 개구부. 문은 방을 나누되 드나드는 곳이고, 창은 나누기만 한다 */
+type OpeningKind = 'door' | 'window';
 const UNDO_LIMIT = 20;
 const PYEONG = 3.3058;
 /** 축척 읽기용 그림 최대 폭. 치수 글자가 작아 검토용보다 크게 보낸다 */
@@ -46,7 +50,7 @@ export const PLAN_PICK_EVENT = 'plan:pick';
 const DEFAULT_PLAN_URL = '/plans/default.png';
 
 /** 편집 모드. 버튼·도움말·런타임 검사가 모두 이 목록에서 파생된다 */
-const MODES = ['view', 'add', 'erase', 'door', 'scale'] as const;
+const MODES = ['view', 'add', 'erase', 'door', 'window', 'scale'] as const;
 type Mode = (typeof MODES)[number];
 
 export interface PlanView {
@@ -103,6 +107,7 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="add" aria-pressed="false">벽 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="erase" aria-pressed="false">벽 지우기</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="door" aria-pressed="false">문 추가</button>
+        <button type="button" class="btn btn--compact" data-action="mode" data-mode="window" aria-pressed="false">창문 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">실제 길이 맞추기</button>
       </div>
       <div class="plan3d__modes" role="group" aria-label="보는 방식">
@@ -130,6 +135,12 @@ export function createPlanView(actions: AppActions): PlanView {
         <label class="plan3d__field plan3d__field--num">
           <span>문 폭 (m, 끌면 끈 만큼)</span>
           <input type="number" data-ctl="doorM" min="0.3" max="6" step="0.1" value="${DEFAULT_DOOR_M}">
+        </label>
+      </div>
+      <div class="plan3d__window" hidden>
+        <label class="plan3d__field plan3d__field--num">
+          <span>창 폭 (m, 끌면 끈 만큼)</span>
+          <input type="number" data-ctl="windowM" min="0.3" max="6" step="0.1" value="${DEFAULT_WINDOW_M}">
         </label>
       </div>
       <form class="plan3d__scale" hidden>
@@ -169,6 +180,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const help = must<HTMLParagraphElement>('.plan3d__help', el);
   const editBox = must<HTMLDivElement>('.plan3d__edit', el);
   const doorBox = must<HTMLDivElement>('.plan3d__door', el);
+  const windowBox = must<HTMLDivElement>('.plan3d__window', el);
   const scaleForm = must<HTMLFormElement>('.plan3d__scale', el);
   const stage = must<HTMLDivElement>('.plan3d__stage', el);
   const advanced = must<HTMLDetailsElement>('.plan3d__advanced', el);
@@ -180,6 +192,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const lengthIn = must<HTMLInputElement>('[data-ctl="length"]', el);
   const thickMIn = must<HTMLInputElement>('[data-ctl="thickM"]', el);
   const doorMIn = must<HTMLInputElement>('[data-ctl="doorM"]', el);
+  const windowMIn = must<HTMLInputElement>('[data-ctl="windowM"]', el);
   const scaleMIn = must<HTMLInputElement>('[data-ctl="scaleM"]', el);
   const heightOut = must<HTMLOutputElement>('[data-out="height"]', el);
   const thickOut = must<HTMLOutputElement>('[data-out="thick"]', el);
@@ -198,8 +211,9 @@ export function createPlanView(actions: AppActions): PlanView {
   const HELP: Record<Mode, string> = {
     view: '',
     add: '바닥을 끌어 벽을 긋습니다. 수평·수직에 가까우면 축에 붙습니다. 길이를 적어 두면 방향만 긋고 길이는 적은 값을 씁니다.',
-    erase: '벽을 클릭하면 교차점 사이 한 구간이 지워지고, 끌어서 사각형을 그리면 그 안의 벽이 모두 지워집니다.',
-    door: '벽을 클릭하면 그 자리에 문 폭만큼 개구부가 뚫립니다. 벽을 따라 끌면 끈 만큼이 폭이 됩니다. 문 위에는 인방이 남아 3D 에서 문으로 보입니다.',
+    erase: '벽을 클릭하면 교차점 사이 한 구간이, 문·창을 클릭하면 그것이 지워집니다. 끌어서 사각형을 그리면 그 안의 벽과 문·창이 모두 지워집니다.',
+    door: '벽을 클릭하면 문 폭만큼 벽이 뚫려 문이 되고, 벽 사이 빈 자리를 클릭하면 그 틈이 문이 됩니다. 끌면 끈 만큼이 폭입니다. 문 양 끝이 벽에 닿아야 방이 나뉩니다.',
+    window: '벽을 클릭하면 창 폭만큼 벽이 투명한 파란 창으로 바뀌고, 벽 사이 빈 자리를 클릭하면 그 틈이 창이 됩니다. 끌면 끈 만큼이 폭입니다.',
     scale: '길이를 아는 벽이나 치수선을 따라 선을 그은 뒤 실제 길이를 넣으세요. 이후 길이·면적이 그 축척으로 계산됩니다.',
   };
 
@@ -365,6 +379,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const thickPx = (): number => Math.max(2, Math.round((Number(thickMIn.value) || ASSUMED_WALL_M) * pxPerMeter));
   const metersOf = (a: Pt, b: Pt): number => Math.hypot(b[0] - a[0], b[1] - a[1]) / pxPerMeter;
   const doorPx = (): number => Math.max(2, Math.round((Number(doorMIn.value) || DEFAULT_DOOR_M) * pxPerMeter));
+  const windowPx = (): number => Math.max(2, Math.round((Number(windowMIn.value) || DEFAULT_WINDOW_M) * pxPerMeter));
 
   async function ensureViewer(): Promise<Viewer> {
     if (viewer) return viewer;
@@ -392,9 +407,13 @@ export function createPlanView(actions: AppActions): PlanView {
     roomsTimer = setTimeout(measureRooms, 250);
   }
 
-  /** 방 계산에서 막을 선분: 문 폭 이하의 개구부 후보 */
+  /**
+   * 방 계산에서 막을 선분: 문 폭 이하의 개구부 후보와, 사용자가 놓은 문·창 전부.
+   * 사용자가 놓은 것은 폭과 무관하게 막는다 — 넓은 창을 두고 방을 합칠 뜻은 없다.
+   */
   function barriersOf(openings: readonly Opening[]): Barrier[] {
-    return openings.filter((o) => o.widthM <= DEFAULT_SEAL_M).map((o) => ({ a: o.a, b: o.b }));
+    const auto = openings.filter((o) => o.widthM <= DEFAULT_SEAL_M).map((o) => ({ a: o.a, b: o.b }));
+    return [...auto, ...doorRects.map(barrierOfRect), ...windowRects.map(barrierOfRect)];
   }
 
   function measureRooms(): void {
@@ -565,9 +584,9 @@ export function createPlanView(actions: AppActions): PlanView {
     if (!prev) return;
     mask = prev.mask;
     undoBtn.disabled = undo.length === 0;
-    // 되돌린 마스크에 벽이 다시 생긴 자리는 더 이상 문이 아니다
+    // 되돌린 마스크에 벽이 다시 생긴 자리는 더 이상 문·창이 아니다
     doorRects = prev.doorRects.filter((r) => !wallFills(prev.mask, r));
-    windowRects = prev.windowRects;
+    windowRects = prev.windowRects.filter((r) => !wallFills(prev.mask, r));
     roomNames = prev.roomNames;
     const scaleChanged = prev.pxPerMeter !== pxPerMeter;
     pxPerMeter = prev.pxPerMeter;
@@ -615,8 +634,48 @@ export function createPlanView(actions: AppActions): PlanView {
     return [start[0] + (dx / len) * px, start[1] + (dy / len) * px];
   }
 
-  const rectOf = (a: Pt, b: Pt): Rect => ({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] });
+  const rectOf = (a: Pt, b: Pt): Rect => ({ x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) });
   const rectPoly = (r: Rect): Pt[] => [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]];
+  const rectsOverlap = (a: Rect, b: Rect): boolean => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const rectHas = (r: Rect, p: Pt): boolean => p[0] >= r.x0 && p[0] < r.x1 && p[1] >= r.y0 && p[1] < r.y1;
+
+  /** 사각형과 겹치는 문·창을 종류 불문 뺀다. 뺀 개수를 돌려준다. 되돌리기는 부르는 쪽이 챙긴다 */
+  function dropOpenings(r: Rect): number {
+    const before = doorRects.length + windowRects.length;
+    doorRects = doorRects.filter((d) => !rectsOverlap(d, r));
+    windowRects = windowRects.filter((d) => !rectsOverlap(d, r));
+    return before - doorRects.length - windowRects.length;
+  }
+
+  const KIND_LABEL: Record<OpeningKind, string> = { door: '문', window: '창' };
+
+  /** 문·창 자리 계산. 벽 위면 벽을 뚫고, 벽 사이 빈 자리면 그 틈에 놓는다 */
+  function openingAt(kind: OpeningKind, start: Pt, p: Pt | null): PlacedOpening | null {
+    if (!mask) return null;
+    const widthPx = kind === 'door' ? doorPx() : windowPx();
+    return placeOpening(mask, W(), H(), start, p, wallPx, widthPx, Math.round(MAX_GAP_M * pxPerMeter));
+  }
+
+  /** 문·창을 확정한다. 같은 자리에 있던 문·창은 새 것으로 바뀐다 */
+  function commitOpening(kind: OpeningKind, start: Pt, p: Pt | null): void {
+    if (!mask || !viewer) return;
+    const placed = openingAt(kind, start, p);
+    const label = KIND_LABEL[kind];
+    if (!placed) {
+      say(`벽도 벽 사이 틈도 없는 자리입니다. 끌어서 ${label} 폭을 그리세요.`, 'error');
+      return;
+    }
+    pushUndo();
+    if (placed.onWall) fillRect(mask, W(), H(), placed.rect, 0);
+    const replaced = dropOpenings(placed.rect);
+    (kind === 'door' ? doorRects : windowRects).push(placed.rect);
+    viewer.setDoors(doorRects);
+    viewer.setWindows(windowRects);
+    const widthM = (placed.widthPx / pxPerMeter).toFixed(2);
+    const how = placed.onWall ? `벽을 뚫어 ${label} ${widthM} m 를 냈습니다.` : `${label} ${widthM} m 를 놓았습니다.`;
+    say(replaced ? `${how} 겹친 문·창 ${replaced}개는 바꿨습니다.` : how);
+    rebuild();
+  }
 
   const editHandlers: EditHandlers = {
     start(p) {
@@ -630,10 +689,10 @@ export function createPlanView(actions: AppActions): PlanView {
         say(`벽 길이 ${metersOf(dragStart, end).toFixed(2)} m`);
       } else if (mode === 'erase') {
         viewer.setGuide(rectPoly(rectOf(dragStart, p)), 'erase');
-      } else if (mode === 'door') {
-        const cut = cutOpening(mask as Uint8Array, W(), H(), dragStart, p, wallPx, doorPx());
-        viewer.setGuide(cut ? rectPoly(cut.rect) : null, 'erase');
-        say(cut ? `문 폭 ${(cut.widthPx / pxPerMeter).toFixed(2)} m` : '벽 위에서 시작하세요.');
+      } else if (mode === 'door' || mode === 'window') {
+        const placed = openingAt(mode, dragStart, p);
+        viewer.setGuide(placed ? rectPoly(placed.rect) : null, mode);
+        say(placed ? `${KIND_LABEL[mode]} 폭 ${(placed.widthPx / pxPerMeter).toFixed(2)} m` : '끌어서 폭을 정하세요.');
       } else if (mode === 'scale') {
         viewer.setGuide(wallOutline(dragStart, p, 2 / (pxPerMeter / 30)), 'scale');
         say(`선 길이 ${Math.hypot(p[0] - dragStart[0], p[1] - dragStart[1]).toFixed(0)} px`);
@@ -655,25 +714,30 @@ export function createPlanView(actions: AppActions): PlanView {
       } else if (mode === 'erase') {
         if (moved < 3) {
           const seg = wallSegmentAt(mask, W(), H(), p, wallPx);
-          if (!seg) { say('그 자리에 벽이 없습니다.'); return; }
-          pushUndo();
-          fillRect(mask, W(), H(), seg, 0);
-          say(`벽 한 구간(${((seg.x1 - seg.x0 > seg.y1 - seg.y0 ? seg.x1 - seg.x0 : seg.y1 - seg.y0) / pxPerMeter).toFixed(2)} m)을 지웠습니다.`);
+          if (seg) {
+            pushUndo();
+            fillRect(mask, W(), H(), seg, 0);
+            say(`벽 한 구간(${((seg.x1 - seg.x0 > seg.y1 - seg.y0 ? seg.x1 - seg.x0 : seg.y1 - seg.y0) / pxPerMeter).toFixed(2)} m)을 지웠습니다.`);
+          } else {
+            // 벽이 아니면 빈 자리에 놓은 문·창일 수 있다. 그것은 마스크에 없어 이렇게만 지운다
+            const hit = [...doorRects, ...windowRects].find((r) => rectHas(r, p));
+            if (!hit) { say('그 자리에 벽도 문·창도 없습니다.'); return; }
+            pushUndo();
+            dropOpenings(hit);
+            say('문·창 하나를 지웠습니다.');
+          }
         } else {
           pushUndo();
-          fillRect(mask, W(), H(), rectOf(start, p), 0);
-          say('사각형 안의 벽을 지웠습니다.');
+          const r = rectOf(start, p);
+          fillRect(mask, W(), H(), r, 0);
+          const dropped = dropOpenings(r);
+          say(dropped ? `사각형 안의 벽과 문·창 ${dropped}개를 지웠습니다.` : '사각형 안의 벽을 지웠습니다.');
         }
-        rebuild();
-      } else if (mode === 'door') {
-        const cut = cutOpening(mask, W(), H(), start, moved >= 3 ? p : null, wallPx, doorPx());
-        if (!cut) { say('그 자리에 벽이 없습니다. 벽 위에서 시작하세요.', 'error'); return; }
-        pushUndo();
-        fillRect(mask, W(), H(), cut.rect, 0);
-        doorRects.push(cut.rect);
         viewer.setDoors(doorRects);
-        say(`문 ${(cut.widthPx / pxPerMeter).toFixed(2)} m 를 냈습니다.`);
+        viewer.setWindows(windowRects);
         rebuild();
+      } else if (mode === 'door' || mode === 'window') {
+        commitOpening(mode, start, moved >= 3 ? p : null);
       } else if (mode === 'scale') {
         if (moved < 5) return;
         scaleLinePx = moved;
@@ -694,6 +758,7 @@ export function createPlanView(actions: AppActions): PlanView {
     help.hidden = next === 'view';
     editBox.hidden = next !== 'add';
     doorBox.hidden = next !== 'door';
+    windowBox.hidden = next !== 'window';
     // 버튼을 아예 감추면 도구 줄이 다시 감겨 캔버스가 위아래로 움직인다. 자리는 지키고 보이지만 않게 한다
     finishEditBtn.classList.toggle('is-invisible', next === 'view');
     if (next !== 'scale') { scaleForm.hidden = true; viewer?.setGuide(null); }
