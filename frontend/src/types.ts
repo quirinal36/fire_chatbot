@@ -138,6 +138,8 @@ export interface AppState {
   readonly user: User | null;
   readonly loginOpen: boolean;
   readonly panelOpen: boolean;
+  /** 도면 작업 공간을 넓히려고 패널만 화면 가득 띄운 상태. 대화·목록은 감추기만 하고 그대로 둔다 */
+  readonly panelExpanded: boolean;
   readonly panelTab: PanelTab;
   readonly sidebarWidth: number;
   readonly panelWidth: number;

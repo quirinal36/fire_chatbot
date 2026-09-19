@@ -11,6 +11,8 @@ export interface AppActions {
   openPanel(tab?: PanelTab): void;
   closePanel(): void;
   selectPanelTab(tab: PanelTab): void;
+  /** 도면 작업 공간 넓히기·되돌리기 */
+  setPanelExpanded(on: boolean): void;
   /** 답변의 근거 목록을 패널에 띄운다 */
   showSources(answerId: string): void;
   /** 근거 카드 한 건의 원문을 연다 */

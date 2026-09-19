@@ -63,6 +63,7 @@ const store = createStore<AppState>({
   user: null,
   loginOpen: false,
   panelOpen: false,
+  panelExpanded: false,
   panelTab: FEATURES.planPanel ? 'plan' : 'law',
   sidebarWidth: stored.sidebar ?? 260,
   panelWidth: stored.panel ?? 520,
@@ -232,11 +233,17 @@ const actions: AppActions = {
   },
 
   closePanel() {
-    store.setState({ panelOpen: false });
+    // 닫을 때는 넓힌 것도 함께 되돌린다. 다음에 열었을 때 대화가 사라진 화면이 나오면 안 된다
+    store.setState({ panelOpen: false, panelExpanded: false });
   },
 
   selectPanelTab(tab) {
-    store.setState({ panelTab: tab });
+    // 도면을 넓혀 둔 채 다른 탭으로 가면 대화가 가려진 채 근거만 보인다. 탭을 옮기면 화면을 되돌린다
+    store.setState(tab === 'plan' ? { panelTab: tab } : { panelTab: tab, panelExpanded: false });
+  },
+
+  setPanelExpanded(on) {
+    store.setState({ panelExpanded: on });
   },
 
   showSources(answerId) {
@@ -400,7 +407,9 @@ const panelResizer = must<HTMLElement>('.resizer[data-target="panel"]');
 
 function render(state: AppState): void {
   sidebarEl.style.setProperty('--sidebar-width', `${state.sidebarWidth}px`);
-  panelResizer.hidden = !state.panelOpen;
+  const expanded = state.panelOpen && state.panelExpanded;
+  app.classList.toggle('is-panel-expanded', expanded);
+  panelResizer.hidden = !state.panelOpen || expanded;
   for (const component of components) component.update(state);
 }
 

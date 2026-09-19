@@ -88,3 +88,31 @@
     display: none;
   }
 }
+
+/* 도면 작업 공간 넓히기 (UX-004).
+   대화·목록은 감추기만 한다. 상태는 그대로 남아 `이전 화면으로` 누르면 보던 곳이 다시 나온다. */
+.app.is-panel-expanded .sidebar,
+.app.is-panel-expanded .chat,
+.app.is-panel-expanded .resizer {
+  display: none;
+}
+
+.app.is-panel-expanded .panel {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  border-left: 0;
+}
+
+/* 넓히면 도면도 커져야 한다. 폭만 늘고 높이가 그대로면 작업 공간이 넓어진 느낌이 없다 */
+.app.is-panel-expanded .plan3d__stage {
+  min-height: 60vh;
+}
+
+@media (max-width: 1080px) {
+  .app.is-panel-expanded .panel {
+    position: static;
+    width: auto;
+    box-shadow: none;
+  }
+}

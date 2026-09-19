@@ -123,6 +123,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
         ).join('')}
       </div>
       <div class="panel__tools">
+        <button type="button" class="btn btn--quiet btn--compact panel__expand" data-action="expand" hidden>도면 크게 보기</button>
         <button type="button" class="btn btn--quiet btn--icon btn--compact"
           data-action="close" aria-label="패널 닫기">${icons.close()}</button>
       </div>
@@ -132,6 +133,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
 
   const body = must<HTMLDivElement>('.panel__body', root);
   const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.tab'));
+  const expandBtn = must<HTMLButtonElement>('[data-action="expand"]', root);
 
   onAction(root, {
     close: () => actions.closePanel(),
@@ -143,6 +145,7 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
       actions.openSource(el.dataset['source'] ?? '');
     },
     'close-source': () => actions.closeSource(),
+    expand: () => actions.setPanelExpanded(!expanded),
     'start-case': () => actions.startCase(),
     'reload-case': () => actions.reloadCase(),
     'confirm-field': (el) => {
@@ -169,6 +172,8 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
 
   let lastHtml = '';
   let lastTab: PanelTab | null = null;
+  /** 도면 작업 공간을 넓혀 둔 상태인가. 버튼이 켜기·되돌리기를 겸한다 */
+  let expanded = false;
 
   return {
     update(state) {
@@ -179,6 +184,11 @@ export function mountPanel(root: HTMLElement, actions: AppActions): Component {
 
       // 꺼진 탭이 요청되면 법령으로 떨어뜨린다. 빈 패널이 열리지 않게 한다.
       const tab: PanelTab = state.panelTab === 'plan' && !FEATURES.planPanel ? 'law' : state.panelTab;
+      // 넓히기는 도면 작업에만 뜻이 있다. 다른 탭에서는 버튼을 감춘다
+      expanded = state.panelExpanded;
+      expandBtn.hidden = tab !== 'plan';
+      expandBtn.textContent = expanded ? '이전 화면으로' : '도면 크게 보기';
+      expandBtn.setAttribute('aria-pressed', String(expanded));
       for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset['tab'] === tab));
 
       const envelope = selectedAnswer(state)?.envelope ?? null;

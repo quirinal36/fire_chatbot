@@ -514,7 +514,18 @@
 
 .panel__tools {
   display: flex;
+  align-items: center;
   gap: var(--space-1);
+}
+
+.panel__expand {
+  white-space: nowrap;
+}
+
+.panel__expand[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--surface-base);
+  border-color: var(--ink);
 }
 
 .panel__body {

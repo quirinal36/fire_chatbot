@@ -5,7 +5,7 @@
  */
 import type * as THREE from 'three';
 import type { Pt, Rect, WallPolygon } from './walls';
-import type { Room } from './rooms';
+import { roomLabel, type Room } from './rooms';
 
 export interface EditHandlers {
   start(p: Pt): void;
@@ -27,14 +27,21 @@ export interface Viewer {
   setDoors(rects: readonly Rect[]): void;
   setHeight(meters: number): void;
   setFloorVisible(visible: boolean): void;
+  /** 보는 방식. 평면은 위에서 곧게 내려다보고 벽을 납작하게 눕혀 원본·치수·구역을 가리지 않는다 */
+  setViewMode(mode: ViewMode): void;
   /** 드래그 중 미리보기 다각형(픽셀 좌표). null 이면 지운다 */
   setGuide(polygon: Pt[] | null, tone?: 'add' | 'erase' | 'scale'): void;
-  /** 편집 핸들러를 걸면 왼쪽 드래그가 편집이 되고, null 이면 회전으로 돌아간다 */
+  /** 편집 핸들러를 걸면 왼쪽 드래그가 편집이 되고, null 이면 보는 방식에 맞는 조작으로 돌아간다 */
   setEditing(handlers: EditHandlers | null): void;
-  topView(): void;
+  /** 지금 보는 방식 그대로 도면 전체가 들어오게 카메라만 다시 맞춘다 */
   fitView(): void;
   dispose(): void;
 }
+
+export type ViewMode = 'plan' | '3d';
+
+/** 평면에서 벽을 눕히는 두께(m). 0 이면 바닥과 겹쳐 깜빡이므로 아주 얕게 남긴다 */
+const PLAN_SLAB_M = 0.02;
 
 const ROOM_HUES = [18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300];
 
@@ -87,14 +94,20 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   let roomList: Room[] = [];
   let roomNames: Readonly<Record<number, string>> = {};
   let highlightedRoom: number | null = null;
+  /** 편집 핸들러. 걸려 있으면 왼쪽 끌기는 편집이다 */
+  let handlers: EditHandlers | null = null;
   let windowRects: readonly Rect[] = [];
   let doorRects: readonly Rect[] = [];
   let height = 2.7;
+  let viewMode: ViewMode = 'plan';
   let s = 1 / 30; // 픽셀 → 미터
   let W = 10;
   let H = 10;
   let fitCenter = new T.Vector3();
   let fitRadius = 5;
+  /** 도면을 감싸는 상자의 반 크기(m). 평면은 이 상자에 맞춘다 */
+  let fitHalfX = 5;
+  let fitHalfZ = 5;
 
   function disposeGroup(group: THREE.Group): void {
     for (const child of group.children) {
@@ -203,18 +216,60 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
         const mesh = new T.Mesh(geo, mat);
         rooms.add(mesh);
       }
-      const name = roomNames[room.id];
-      const label = labelSprite(`${name ?? room.id} · ${room.area.toFixed(1)}㎡`, hue, highlightedRoom === null || selected ? 1 : 0.28);
+      // 고른 구역은 색만이 아니라 글자로도 표시한다. 색을 구별하기 어려워도 어디를 골랐는지 알 수 있어야 한다
+      const text = `${selected ? '● ' : ''}${roomLabel(room.id, roomNames)} · ${room.area.toFixed(1)}㎡`;
+      const label = labelSprite(text, hue, highlightedRoom === null || selected ? 1 : 0.28);
       label.position.set(room.center[0] * s, 0.3, room.center[1] * s);
       rooms.add(label);
     });
   }
 
+  /**
+   * 보는 방식을 장면에 반영한다. 평면에서는 벽을 바닥에 눕히고(높이만 눌러 형상은 그대로다)
+   * 문틀·창틀처럼 세로로 서 있는 것은 감춘다. 위에서 보면 가리기만 하고 알려 주는 게 없다.
+   */
+  function applyViewMode(): void {
+    const plan = viewMode === 'plan';
+    walls.scale.y = plan ? PLAN_SLAB_M / Math.max(height, 0.01) : 1;
+    doors.visible = !plan;
+    windows.visible = !plan;
+    // 평면에서 돌리면 더 이상 평면이 아니다. 돌리기 대신 끌어서 옮긴다
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = plan ? 0 : Math.PI / 2 - 0.02;
+    applyControls();
+  }
+
+  /** 편집 중이면 왼쪽 끌기는 편집이다. 아니면 평면은 옮기기, 3D 는 돌리기 */
+  function applyControls(): void {
+    if (handlers) {
+      controls.mouseButtons.LEFT = null;
+      controls.touches.ONE = null;
+      return;
+    }
+    controls.mouseButtons.LEFT = viewMode === 'plan' ? T.MOUSE.PAN : T.MOUSE.ROTATE;
+    controls.touches.ONE = viewMode === 'plan' ? T.TOUCH.PAN : T.TOUCH.ROTATE;
+  }
+
+  /** 지금 보는 방식의 카메라 방향. 평면은 바로 위에서 */
+  function viewDirection(): THREE.Vector3 {
+    return viewMode === 'plan' ? new T.Vector3(0, 1, 0.0001) : new T.Vector3(0, 0.8, 1);
+  }
+
+  function switchView(next: ViewMode): void {
+    viewMode = next;
+    applyViewMode();
+    fitCamera(viewDirection());
+  }
+
   function fitCamera(direction: THREE.Vector3): void {
-    // 모델을 감싸는 구가 세로·가로 시야각 중 좁은 쪽에 들어오도록 거리를 잡는다
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const dist = fitRadius / Math.sin(Math.min(vFov, hFov) / 2);
+    // 평면은 바로 위에서 보므로 도면 상자가 화면에 꽉 차게 맞춘다. 구에 맞추면 넓은 화면에서 도면이 작아진다.
+    // 3D 는 돌려 볼 것이므로 어느 각도에서도 잘리지 않는 구에 맞춘다
+    const dist =
+      viewMode === 'plan'
+        ? Math.max(fitHalfX / Math.tan(hFov / 2), fitHalfZ / Math.tan(vFov / 2)) * 1.06
+        : fitRadius / Math.sin(Math.min(vFov, hFov) / 2);
     controls.target.copy(fitCenter);
     camera.position.copy(fitCenter).addScaledVector(direction.clone().normalize(), dist);
     camera.far = dist * 10;
@@ -231,6 +286,8 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     if (minX >= maxX || minY >= maxY) { minX = 0; minY = 0; maxX = W; maxY = H; }
     fitCenter = new T.Vector3((minX + maxX) / 2, 0, (minY + maxY) / 2);
     fitRadius = (Math.hypot(maxX - minX, maxY - minY) / 2) * 1.05;
+    fitHalfX = Math.max((maxX - minX) / 2, 0.5);
+    fitHalfZ = Math.max((maxY - minY) / 2, 0.5);
   }
 
   function resize(): void {
@@ -249,7 +306,6 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   const raycaster = new T.Raycaster();
   const plane = new T.Plane(new T.Vector3(0, 1, 0), 0);
   const hit = new T.Vector3();
-  let handlers: EditHandlers | null = null;
   let dragging = false;
 
   function toPlan(event: PointerEvent): Pt | null {
@@ -324,11 +380,14 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       buildDoors();
       computeFit();
       buildRooms();
-      fitCamera(new T.Vector3(0, 0.8, 1));
+      // 처음 여는 도면은 평면이다. 입체는 눌러서 본다
+      applyViewMode();
+      fitCamera(viewDirection());
     },
     setWalls(next) {
       polygons = next;
       buildWalls();
+      applyViewMode();
     },
     setRooms(next, names = {}) {
       roomList = next;
@@ -352,6 +411,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       buildWalls();
       buildWindows();
       buildDoors();
+      applyViewMode();
     },
     setFloorVisible(visible) {
       floor.visible = visible;
@@ -369,15 +429,14 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     setEditing(next) {
       handlers = next;
       dragging = false;
-      controls.mouseButtons.LEFT = next ? null : T.MOUSE.ROTATE;
-      controls.touches.ONE = next ? null : T.TOUCH.ROTATE;
+      applyControls();
       canvas.style.cursor = next ? 'crosshair' : '';
     },
-    topView() {
-      fitCamera(new T.Vector3(0, 1, 0.0001));
+    setViewMode(next) {
+      switchView(next);
     },
     fitView() {
-      fitCamera(new T.Vector3(0, 0.8, 1));
+      fitCamera(viewDirection());
     },
     dispose() {
       running = false;

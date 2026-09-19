@@ -6,11 +6,11 @@
 import { esc, must, onAction } from '../lib/dom';
 import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, updatePlan, type PlanSummary, type ScaleStatus } from '../api/plans';
 import { cutOpening, fillRect, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
-import { findRooms, type Barrier, type RoomReport } from '../plan/rooms';
+import { findRooms, roomLabel, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import { decideImport, IMPORT_TARGETS, type AreaChoice } from '../plan/areaImport';
 import { describeFailure, failureInput, noScaleFound, type Failure, type RecoveryAction } from '../plan/failure';
-import type { EditHandlers, Viewer } from '../plan/viewer';
+import type { EditHandlers, Viewer, ViewMode } from '../plan/viewer';
 import type { AppActions } from '../actions';
 import type { AppState } from '../types';
 
@@ -105,11 +105,13 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="door" aria-pressed="false">문 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">실제 길이 맞추기</button>
       </div>
-      <div class="plan3d__modes">
+      <div class="plan3d__modes" role="group" aria-label="보는 방식">
         <button type="button" class="btn btn--quiet btn--compact is-invisible" data-action="finish-edit">편집 끝내기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="undo" disabled>되돌리기</button>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="top">평면 보기</button>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="fit">3D 보기</button>
+        <button type="button" class="btn btn--compact" data-action="view" data-view="plan" aria-pressed="true">평면 보기</button>
+        <button type="button" class="btn btn--compact" data-action="view" data-view="3d" aria-pressed="false">3D 보기</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="fit">도면 전체 맞추기</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="floor" aria-pressed="true">원본 도면 표시</button>
       </div>
     </div>
     <div class="plan3d__context" aria-live="polite">
@@ -150,10 +152,6 @@ export function createPlanView(actions: AppActions): PlanView {
         <span>벽 두께 기준 <output data-out="thick">-</output> px</span>
         <input type="range" data-ctl="thick" min="2" max="40" step="1" value="8">
       </label>
-      <label class="plan3d__field plan3d__field--check">
-        <input type="checkbox" data-ctl="floor" checked>
-        <span>원본 도면 표시</span>
-      </label>
     </div>
     <div class="plan3d__areas" hidden></div>
     <p class="plan3d__note">두꺼운 검은 선만 벽으로 봅니다. 가구·글자가 벽으로 잡히거나 벽이 빠지면 벽 두께 기준을 조절하세요.
@@ -174,7 +172,8 @@ export function createPlanView(actions: AppActions): PlanView {
   const areas = must<HTMLDivElement>('.plan3d__areas', el);
   const heightIn = must<HTMLInputElement>('[data-ctl="height"]', el);
   const thickIn = must<HTMLInputElement>('[data-ctl="thick"]', el);
-  const floorIn = must<HTMLInputElement>('[data-ctl="floor"]', el);
+  const floorBtn = must<HTMLButtonElement>('[data-action="floor"]', el);
+  const viewBtns = Array.from(el.querySelectorAll<HTMLButtonElement>('[data-action="view"]'));
   const lengthIn = must<HTMLInputElement>('[data-ctl="length"]', el);
   const thickMIn = must<HTMLInputElement>('[data-ctl="thickM"]', el);
   const doorMIn = must<HTMLInputElement>('[data-ctl="doorM"]', el);
@@ -246,6 +245,10 @@ export function createPlanView(actions: AppActions): PlanView {
   /** 벽·축척이 바뀔 때마다 올라간다. 늦게 도착한 치수 읽기 결과를 버리는 데 쓴다 */
   let rev = 0;
   let recognitionConfirmed = false;
+  /** 보는 방식. 도면은 평면으로 연다 — 입체 벽은 원본·치수·구역을 가린다 */
+  let viewMode: ViewMode = 'plan';
+  /** 원본 도면을 바닥에 깔아 둘 것인가 */
+  let floorVisible = true;
   /** 면적 가져오기 상자를 열어 두었는가. 사용자가 열었을 때만 그린다 */
   let importOpen = false;
   /** 가져오기 상자에서 고른 면적·항목·확인 표시. 면적을 다시 잴 때마다 상자를 새로 그리므로 여기에 둔다 */
@@ -320,7 +323,8 @@ export function createPlanView(actions: AppActions): PlanView {
     stage.dataset['empty'] = 'false';
     viewer = await createViewer(host);
     viewer.setHeight(Number(heightIn.value));
-    viewer.setFloorVisible(floorIn.checked);
+    viewer.setFloorVisible(floorVisible);
+    viewer.setViewMode(viewMode);
     return viewer;
   }
 
@@ -378,8 +382,11 @@ export function createPlanView(actions: AppActions): PlanView {
       },
     }[scaleStatus];
     const rows = report.rooms
-      .map((r, i) => `<li><button type="button" class="plan3d__room" data-action="room-select" data-room="${r.id}" aria-pressed="${highlightedRoom === r.id}"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
-        <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area, approximate))}</span></button></li>`)
+      .map((r, i) => {
+        const on = highlightedRoom === r.id;
+        return `<li><button type="button" class="plan3d__room" data-action="room-select" data-room="${r.id}" aria-pressed="${on}"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
+        <span>${on ? '● ' : ''}${esc(roomLabel(r.id, roomNames))}</span><span class="plan3d__room-area">${esc(fmtArea(r.area, approximate))}</span></button></li>`;
+      })
       .join('');
     areas.innerHTML = `
       <p class="plan3d__total">바닥 면적 <strong>${esc(fmtArea(report.floorArea, approximate))}</strong>
@@ -398,7 +405,7 @@ export function createPlanView(actions: AppActions): PlanView {
     if (!report) return [];
     return [
       { id: 'floor', label: '전체 바닥 면적', areaM2: report.floorArea },
-      ...report.rooms.map((r) => ({ id: `room:${r.id}`, label: roomNames[r.id] ?? `구역 ${r.id}`, areaM2: r.area })),
+      ...report.rooms.map((r) => ({ id: `room:${r.id}`, label: roomLabel(r.id, roomNames), areaM2: r.area })),
     ];
   }
 
@@ -518,6 +525,8 @@ export function createPlanView(actions: AppActions): PlanView {
     viewer?.setDoors(doorRects);
     viewer?.setWindows(windowRects);
     rev++;
+    // 되돌린 뒤에도 "벽을 추가했습니다" 가 남아 있으면 방금 한 일이 살아 있는 줄 안다
+    say(undo.length ? `한 단계 되돌렸습니다. ${undo.length}단계 더 되돌릴 수 있습니다.` : '한 단계 되돌렸습니다. 더 되돌릴 것이 없습니다.');
     if (scaleChanged) applyScale();
     else rebuild();
   }
@@ -637,7 +646,22 @@ export function createPlanView(actions: AppActions): PlanView {
     finishEditBtn.classList.toggle('is-invisible', next === 'view');
     if (next !== 'scale') { scaleForm.hidden = true; viewer?.setGuide(null); }
     viewer?.setEditing(next === 'view' ? null : editHandlers);
-    if (wasView && next !== 'view') viewer?.topView();
+    // 편집은 평면에서 한다. 입체로 보면서 그으면 벽이 어디에 놓이는지 알기 어렵다
+    if (wasView && next !== 'view') setViewMode('plan');
+  }
+
+  /** 보는 방식을 바꾸고 버튼 상태를 맞춘다. 벽·축척·구역은 건드리지 않는다 — 카메라와 벽 높이만 바뀐다 */
+  function setViewMode(next: ViewMode): void {
+    viewMode = next;
+    for (const b of viewBtns) b.setAttribute('aria-pressed', String(b.dataset['view'] === next));
+    viewer?.setViewMode(next);
+  }
+
+  function setFloorVisible(next: boolean): void {
+    floorVisible = next;
+    floorBtn.setAttribute('aria-pressed', String(next));
+    floorBtn.textContent = next ? '원본 도면 표시' : '원본 도면 감춤';
+    viewer?.setFloorVisible(next);
   }
 
   onAction(el, {
@@ -689,8 +713,12 @@ export function createPlanView(actions: AppActions): PlanView {
     'area-import-close': () => { importOpen = false; renderAreas(); },
     'open-case': () => actions.startCase(),
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
-    top: () => viewer?.topView(),
+    view: (b) => {
+      const next = b.dataset['view'];
+      if (next === 'plan' || next === '3d') setViewMode(next);
+    },
     fit: () => viewer?.fitView(),
+    floor: () => setFloorVisible(!floorVisible),
   });
 
   scaleForm.addEventListener('submit', (e) => {
@@ -747,7 +775,7 @@ export function createPlanView(actions: AppActions): PlanView {
     const v = await ensureViewer();
     v.setWalls(polygonsFromMask(mask, W(), H()));
     v.setModel(W(), H(), source, pxPerMeter);
-    v.topView();
+    setViewMode('plan');
     windowRects = [];
     doorRects = [];
     roomNames = {};
@@ -965,7 +993,7 @@ export function createPlanView(actions: AppActions): PlanView {
       v.setHeight(d.wallHeightM);
       v.setWalls(polygonsFromMask(mask, W(), H()));
       v.setModel(W(), H(), source, pxPerMeter);
-      v.topView();
+      setViewMode('plan');
       windowRects = ann.windowRects;
       doorRects = ann.doorRects;
       roomNames = ann.roomNames;
@@ -1105,7 +1133,7 @@ export function createPlanView(actions: AppActions): PlanView {
     userThick = Number(thickIn.value);
     void show();
   });
-  floorIn.addEventListener('change', () => viewer?.setFloorVisible(floorIn.checked));
+
 
   const onKey = (e: KeyboardEvent): void => {
     if (mode === 'view') return;

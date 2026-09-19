@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fillRect } from './walls';
-import { findRooms } from './rooms';
+import { findRooms, roomLabel } from './rooms';
 
 describe('findRooms', () => {
   it('문으로 이어진 두 방을 따로 재고 바깥은 세지 않는다', () => {
@@ -32,5 +32,20 @@ describe('findRooms', () => {
     expect(r.footprintArea).toBeCloseTo(160 * 80 / 100, 0);
     expect(r.floorArea).toBeLessThan(r.footprintArea);
     expect(r.rooms[0]?.polygons.length).toBeGreaterThan(0);
+  });
+});
+
+describe('roomLabel', () => {
+  it('이름이 없으면 번호로 부른다', () => {
+    expect(roomLabel(3)).toBe('구역 3');
+    expect(roomLabel(3, {})).toBe('구역 3');
+  });
+
+  it('이름을 붙여도 번호를 버리지 않는다 — 목록과 도면이 같은 곳을 가리켜야 한다', () => {
+    expect(roomLabel(2, { 2: '강의실' })).toBe('강의실 (구역 2)');
+  });
+
+  it('빈 이름은 번호로 되돌린다', () => {
+    expect(roomLabel(1, { 1: '  ' })).toBe('구역 1');
   });
 });

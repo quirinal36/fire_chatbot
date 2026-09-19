@@ -17,6 +17,15 @@
  */
 import { dilate, labelComponents, morphClose, polygonsFromMask, type Pt, type WallPolygon } from './walls';
 
+/**
+ * 구역을 부르는 이름. 목록과 도면이 똑같은 말을 써야 색을 못 봐도 둘을 잇는다.
+ * 이름을 붙인 구역도 번호를 버리지 않는다 — 목록은 번호로, 도면은 이름으로 부르면 같은 곳인 줄 모른다.
+ */
+export function roomLabel(id: number, names?: Readonly<Record<number, string>>): string {
+  const name = names?.[id]?.trim();
+  return name ? `${name} (구역 ${id})` : `구역 ${id}`;
+}
+
 export interface Room {
   readonly id: number;
   /** ㎡ */
