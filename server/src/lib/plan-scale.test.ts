@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildScalePrompt, estimateScale, readScale, scaleReadSchema, SCALE_JSON_SCHEMA } from './plan-scale';
+import { buildScalePrompt, estimateScale, plausibleGuess, readScale, scaleReadSchema, SCALE_JSON_SCHEMA } from './plan-scale';
 
 vi.mock('./env', () => ({
   requireKey: () => 'test-key',
@@ -20,7 +20,10 @@ function chain(y: number, x0: number, mms: readonly number[], pxPerMeter = 100):
     return seg;
   });
 }
-const read = (dimensions: unknown[], unit = 'mm') => scaleReadSchema.parse({ unit, dimensions, note: '' });
+const read = (dimensions: unknown[], unit = 'mm', fallbacks: unknown[] = []) =>
+  scaleReadSchema.parse({ unit, dimensions, fallbacks, note: '' });
+/** 1m = pxPerMeter 인 도면에서 meters 짜리 물건이 차지하는 픽셀 */
+const obj = (what: string, meters: number, pxPerMeter: number) => ({ what, meters, px: meters * pxPerMeter });
 
 const reply = (content: unknown) =>
   new Response(
@@ -36,6 +39,9 @@ describe('치수선으로 축척 읽기', () => {
     expect(p).toContain('치수선');
     // 숫자 자리가 아니라 구간의 양 끝을 달라고 해야 한다
     expect(p).toContain('숫자 자체의 위치가 아니라');
+    // 치수선이 없는 도면을 위한 대안도 일러 준다
+    expect(p).toContain('실내문 폭 0.9m');
+    expect(p).toContain('서로 다른 것으로 셋 이상');
   });
 
   it('strict 스키마는 모든 속성을 required 로 둔다', () => {
@@ -123,12 +129,55 @@ describe('치수선으로 축척 읽기', () => {
     expect(estimateScale(read(chain(1500, 140, [100, 120])), W, H)).toBeNull();
   });
 
+  it('치수선이 없으면 표준 치수 여러 개의 중앙값을 쓴다', () => {
+    const g = plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57), obj('킹 침대 세로', 2.0, 57), obj('변기 길이', 0.7, 57)]), W, H);
+    expect(g?.pxPerMeter).toBeCloseTo(57, 6);
+    expect(g?.used).toBe(3);
+    expect(g?.basis).toContain('실내문 폭');
+  });
+
+  it('하나를 잘못 봐도 중앙값이 버틴다', () => {
+    // 침대를 가로(1.9m)로 재 놓고 세로(2.0m)라고 한 경우
+    const g = plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57), obj('킹 침대 세로', 2.0, 40), obj('변기 길이', 0.7, 57), obj('욕조 길이', 1.7, 58)]), W, H);
+    expect(g?.pxPerMeter).toBeCloseTo(57, 0);
+    expect(g?.spread).toBeGreaterThan(0.2);
+  });
+
+  it('말이 안 되는 근거는 버린다', () => {
+    // 1m 가 2px: 건물이 화면을 한참 넘는다
+    expect(plausibleGuess(read([], 'mm', [obj('문', 0.9, 2)]), W, H)).toBeNull();
+    // 1m 가 긴 변의 절반보다 크다: 건물이 2m 도 안 된다
+    expect(plausibleGuess(read([], 'mm', [obj('문', 0.9, H)]), W, H)).toBeNull();
+    expect(plausibleGuess(read([], 'mm', []), W, H)).toBeNull();
+    // 표준 치수가 0 이면 나눌 수 없다
+    expect(plausibleGuess(read([], 'mm', [{ what: 'x', meters: 0, px: 50 }]), W, H)).toBeNull();
+  });
+
+  it('치수선을 읽었으면 어림값은 쓰지 않는다', async () => {
+    const fetchImpl = vi.fn(async () =>
+      reply({ unit: 'mm', dimensions: chain(1500, 140, [3670, 4310, 2620]), fallbacks: [obj('침대', 2, 57)], note: '' }),
+    );
+    const out = await readScale({ image: { bytes: new Uint8Array([1]), type: 'image/jpeg', width: W, height: H } }, fetchImpl as unknown as typeof fetch);
+    expect(out.estimate?.pxPerMeter).toBeCloseTo(100, 6);
+    expect(out.guess).toBeNull();
+  });
+
+  it('치수선이 없으면 어림값이 돌아온다', async () => {
+    const fetchImpl = vi.fn(async () =>
+      reply({ unit: 'mm', dimensions: [], fallbacks: [obj('킹 침대 세로', 2.0, 57), obj('실내문 폭', 0.9, 57)], note: '치수선 없음' }),
+    );
+    const out = await readScale({ image: { bytes: new Uint8Array([1]), type: 'image/jpeg', width: W, height: H } }, fetchImpl as unknown as typeof fetch);
+    expect(out.estimate).toBeNull();
+    expect(out.guess?.pxPerMeter).toBeCloseTo(57, 6);
+    expect(out.guess?.used).toBe(2);
+  });
+
   it('이미지를 data URL 로 보내고 축척을 계산해 돌려준다', async () => {
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages: { content: { type: string; image_url?: { url: string } }[] }[] };
       const img = body.messages[0]?.content.find((c) => c.type === 'image_url');
       expect(img?.image_url?.url).toMatch(/^data:image\/jpeg;base64,/);
-      return reply({ unit: 'mm', dimensions: chain(1500, 140, [3670, 4310, 2620]), note: '아래 치수선을 읽었다.' });
+      return reply({ unit: 'mm', dimensions: chain(1500, 140, [3670, 4310, 2620]), fallbacks: [], note: '아래 치수선을 읽었다.' });
     });
     const out = await readScale({ image: { bytes: new Uint8Array([1, 2, 3]), type: 'image/jpeg', width: W, height: H } }, fetchImpl as unknown as typeof fetch);
     expect(out.estimate?.pxPerMeter).toBeCloseTo(100, 6);
@@ -136,9 +185,10 @@ describe('치수선으로 축척 읽기', () => {
   });
 
   it('치수를 못 찾았다고 오면 estimate 가 null 이고 실패는 아니다', async () => {
-    const fetchImpl = vi.fn(async () => reply({ unit: 'mm', dimensions: [], note: '치수선이 보이지 않는다.' }));
+    const fetchImpl = vi.fn(async () => reply({ unit: 'mm', dimensions: [], fallbacks: [], note: '치수선이 보이지 않는다.' }));
     const out = await readScale({ image: { bytes: new Uint8Array([1]), type: 'image/png', width: W, height: H } }, fetchImpl as unknown as typeof fetch);
     expect(out.estimate).toBeNull();
+    expect(out.guess).toBeNull();
     expect(out.read.note).toContain('치수선');
   });
 });

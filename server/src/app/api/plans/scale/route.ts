@@ -23,6 +23,7 @@ export const POST = withErrors(async (req: Request) => {
     const outcome = await readScale(input);
     return NextResponse.json({
       estimate: outcome.estimate,
+      guess: outcome.guess,
       note: outcome.read.note,
       model: outcome.model,
       promptVersion: outcome.promptVersion,

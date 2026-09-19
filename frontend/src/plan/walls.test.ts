@@ -298,3 +298,59 @@ describe('두 가지 두께로 그린 도면', () => {
     expect(mask[150 * w + 35]).toBe(1);
   });
 });
+
+/**
+ * 선으로만 그린 도면(가구·글자가 1~2px). 얇은 런이 아무리 많아도 벽 표현으로 보면 안 된다.
+ * 이걸 놓치면 열림 커널이 3 으로 내려가 걸러 내는 일을 아예 안 하게 된다.
+ */
+describe('가는 선이 많은 도면', () => {
+  const w = 400;
+  const h = 300;
+  const WALL = 6;
+
+  function draw(): Uint8ClampedArray {
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    const dot = (x: number, y: number): void => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const p = (y * w + x) * 4;
+      px[p] = px[p + 1] = px[p + 2] = 0;
+    };
+    const box = (x0: number, y0: number, x1: number, y1: number): void => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) dot(x, y);
+    };
+    const [L, T, R, B] = [30, 30, w - 30, h - 30];
+    box(L, T, R, T + WALL);
+    box(L, B - WALL, R, B);
+    box(L, T, L + WALL, B);
+    box(R - WALL, T, R, B);
+    box(200, T, 200 + WALL, B);
+    // 가구·글자: 1~2px 선을 잔뜩 (실제 도면에서는 이쪽이 벽보다 픽셀이 많다)
+    for (let k = 0; k < 24; k++) {
+      const y = 45 + k * 9;
+      for (let x = 45; x < 190; x++) { dot(x, y); dot(x, y + 1); }
+    }
+    for (let k = 0; k < 14; k++) {
+      const x = 215 + k * 11;
+      for (let y = 45; y < 250; y++) dot(x, y);
+    }
+    return px;
+  }
+
+  it('가는 선은 얇은 벽으로 뽑지 않는다', () => {
+    const bin = binarize(draw(), w, h, DEFAULT_DARK);
+    const solid = morphClose(bin, w, h, hatchKernel(estimateThickness(bin, w, h)));
+    const modes = estimateThicknessModes(solid, w, h);
+    expect(modes.thick).toBe(WALL);
+    expect(modes.thin).toBeNull();
+  });
+
+  it('가구가 마스크에 남지 않는다', () => {
+    const { mask, thinPx } = wallMask(draw(), w, h);
+    expect(thinPx).toBeNull();
+    expect(mask[150 * w + 120]).toBe(0);
+    expect(mask[150 * w + 260]).toBe(0);
+    // 벽은 남는다
+    expect(mask[150 * w + 32]).toBe(1);
+    expect(mask[150 * w + 202]).toBe(1);
+  });
+});

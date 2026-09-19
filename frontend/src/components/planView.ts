@@ -821,19 +821,27 @@ export function createPlanView(actions: AppActions): PlanView {
       ctx.drawImage(source, 0, 0, c.width, c.height);
       const res = await readPlanScale(await toBlob(c, 'image/jpeg', 0.9), c.width, c.height);
       if (gen !== planGen) return; // 읽는 사이에 다른 도면을 올렸다
-      if (!res.estimate) {
+      if (!res.estimate && !res.guess) {
         // 자동 호출은 조용히 넘어가지만, 왜 못 읽었는지는 남겨야 원인을 찾을 수 있다
         console.warn('[plan] 치수 읽기: 쓸 만한 치수가 없음', res.note);
         if (!opts.auto) say(`치수를 읽지 못했습니다. 축척 모드로 직접 맞춰 주세요. (${res.note})`, 'error');
         return;
       }
       // 보낸 그림 기준 축척을 마스크 기준으로 되돌린다
-      pxPerMeter = res.estimate.pxPerMeter / scale;
+      if (res.estimate) {
+        pxPerMeter = res.estimate.pxPerMeter / scale;
+        scaleSource = `치수선 ${res.estimate.used}개`;
+        const labels = res.estimate.labels.slice(0, 4).join(', ');
+        say(`치수선으로 축척을 맞췄습니다. 1m = ${pxPerMeter.toFixed(1)}px (치수 ${res.estimate.used}개가 서로 맞음: ${labels}).`);
+      } else {
+        // 치수선이 없는 도면이다. 벽 두께 0.2m 가정보다는 표준 치수 어림이 훨씬 낫다
+        const g = res.guess as NonNullable<typeof res.guess>;
+        pxPerMeter = g.pxPerMeter / scale;
+        scaleSource = `표준 치수 ${g.used}개 어림`;
+        say(`치수선이 없어 표준 치수로 어림했습니다. 1m = ${pxPerMeter.toFixed(1)}px (${g.basis}). 어림이라 오차가 있습니다. 정확히 맞추려면 축척 모드를 쓰세요.`);
+      }
       scaleFixed = true;
-      scaleSource = `치수선 ${res.estimate.used}개`;
       applyScale();
-      const labels = res.estimate.labels.slice(0, 4).join(', ');
-      say(`치수선으로 축척을 맞췄습니다. 1m = ${pxPerMeter.toFixed(1)}px (치수 ${res.estimate.used}개가 서로 맞음: ${labels}).`);
     } catch (err) {
       console.warn('[plan] 치수 읽기 실패', err);
       if (gen === planGen && !opts.auto) say(`치수를 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');

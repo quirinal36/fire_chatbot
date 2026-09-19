@@ -48,6 +48,17 @@ export const dimensionSchema = z.object({
 });
 export type Dimension = z.infer<typeof dimensionSchema>;
 
+/** 치수선이 없을 때 표준 치수로 어림한 값. 근거 하나당 하나씩 받는다 */
+export const fallbackItemSchema = z.object({
+  /** 잰 것 (예: 실내문 폭) */
+  what: z.string().transform((v) => v.trim().slice(0, 40)),
+  /** 그것의 표준 치수 (m) */
+  meters: z.coerce.number(),
+  /** 그것이 그림에서 차지하는 픽셀 */
+  px: z.coerce.number(),
+});
+export type FallbackItem = z.infer<typeof fallbackItemSchema>;
+
 export const scaleReadSchema = z.object({
   /** 치수 단위. 도면 대부분은 mm 다 */
   unit: z.enum(['mm', 'cm', 'm']).catch('mm'),
@@ -55,6 +66,10 @@ export const scaleReadSchema = z.object({
     .array(dimensionSchema)
     .transform((a) => a.slice(0, 40))
     .catch([] as Dimension[]),
+  fallbacks: z
+    .array(fallbackItemSchema)
+    .transform((a) => a.slice(0, 8))
+    .catch([] as FallbackItem[]),
   note: z.string().transform((v) => v.trim().slice(0, 200)),
 });
 export type ScaleRead = z.infer<typeof scaleReadSchema>;
@@ -63,7 +78,7 @@ const point = { type: 'object', additionalProperties: false, required: ['x', 'y'
 export const SCALE_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['unit', 'dimensions', 'note'],
+  required: ['unit', 'dimensions', 'fallbacks', 'note'],
   properties: {
     unit: { type: 'string', enum: ['mm', 'cm', 'm'], description: '치수 숫자의 단위' },
     dimensions: {
@@ -78,6 +93,20 @@ export const SCALE_JSON_SCHEMA = {
           from: point,
           to: point,
           label: { type: 'string', description: '도면에 적힌 글자 그대로' },
+        },
+      },
+    },
+    fallbacks: {
+      type: 'array',
+      description: '치수선이 없을 때 쓸 표준 치수 근거. 서로 다른 물건으로 여러 개',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['what', 'meters', 'px'],
+        properties: {
+          what: { type: 'string', description: '무엇을 쟀는지 (예: 안방 킹 침대 세로)' },
+          meters: { type: 'number', description: '그것의 표준 치수 (m)' },
+          px: { type: 'number', description: '그것이 이 그림에서 차지하는 픽셀' },
         },
       },
     },
@@ -102,6 +131,13 @@ export function buildScalePrompt(width: number, height: number): string {
     '치수선이 아닌 숫자(실번호, 면적 표기, 축척 표기, 주석)는 넣지 마세요.',
     '구간을 정확히 집을 수 없는 숫자는 아예 빼는 편이 낫습니다. 지어내지 마세요.',
     '치수를 하나도 못 찾았으면 dimensions 를 빈 배열로 두고 note 에 이유를 적으세요.',
+    '',
+    '치수선이 없으면 fallbacks 에 표준 치수를 아는 물건을 **서로 다른 것으로 셋 이상** 골라 적으세요.',
+    '하나만 재면 그것 하나가 틀렸을 때 확인할 길이 없습니다. 항목마다 무엇(what)·표준 치수(meters)·그림에서의 픽셀(px) 을 적습니다.',
+    '쓸 만한 표준 치수: 실내문 폭 0.9m, 현관문 1.0m, 변기 길이 0.7m, 욕조 길이 1.7m, 세면대 폭 0.6m,',
+    '퀸 침대 1.5×2.0m, 킹 침대 1.9×2.0m, 싱크대 깊이 0.6m, 냉장고 폭 0.9m, 계단 폭 1.0m, 식탁 의자 0.45m.',
+    '재는 방향을 분명히 하세요 — 침대는 세로 2.0m, 문은 열리는 폭입니다. 확실하지 않은 물건은 빼세요.',
+    '치수선을 찾았으면 fallbacks 는 비워 두어도 됩니다.',
   ].join('\n');
 }
 
@@ -222,6 +258,26 @@ export function estimateScale(read: ScaleRead, width: number, height: number): S
   return { pxPerMeter, used: kept.length, total: read.dimensions.length, spread, labels: kept.map((c) => c.label) };
 }
 
+/**
+ * 표준 치수 어림값. 치수선이 없는 도면의 마지막 수단이다.
+ *
+ * 값 하나만 받으면 호출마다 10% 넘게 흔들린다(면적으로 25%). 서로 다른 물건을 여러 개 받아
+ * 중앙값을 쓰면 하나를 잘못 보아도 결과가 끌려가지 않는다. 치수 사슬과 같은 원리다.
+ * 말이 되는 범위인지도 본다 — 1m 가 4px 보다 작으면 건물이 화면을 한참 넘고,
+ * 긴 변의 절반보다 크면 건물이 2m 도 안 된다는 뜻이다.
+ */
+export function plausibleGuess(read: ScaleRead, width: number, height: number): ScaleGuess | null {
+  const side = Math.max(width, height);
+  const vals = read.fallbacks
+    .map((f) => ({ v: f.px / f.meters, f }))
+    .filter(({ v, f }) => f.meters > 0.1 && f.px > 2 && Number.isFinite(v) && v >= 4 && v <= side / 2);
+  if (!vals.length) return null;
+  const pxPerMeter = median(vals.map((x) => x.v));
+  const spread = Math.max(...vals.map((x) => Math.abs(x.v - pxPerMeter) / pxPerMeter));
+  const basis = vals.map((x) => `${x.f.what} ${Math.round(x.f.px)}px ÷ ${x.f.meters}m`).join(', ').slice(0, 200);
+  return { pxPerMeter, used: vals.length, spread, basis };
+}
+
 export interface ScaleInput {
   image: { bytes: Uint8Array; type: string; width: number; height: number };
 }
@@ -253,8 +309,19 @@ export async function parseScaleUpload(req: Request): Promise<ScaleInput> {
   return { image: { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type, width: meta.data.width, height: meta.data.height } };
 }
 
+/** 치수선이 없을 때 쓰는 어림값. 확정이 아니므로 화면에 그렇게 표시한다 */
+export interface ScaleGuess {
+  readonly pxPerMeter: number;
+  /** 근거로 쓴 물건 수 */
+  readonly used: number;
+  /** 근거끼리 벌어진 정도 (0 이면 완전히 일치) */
+  readonly spread: number;
+  readonly basis: string;
+}
+
 export interface ScaleOutcome {
   readonly estimate: ScaleEstimate | null;
+  readonly guess: ScaleGuess | null;
   readonly read: ScaleRead;
   readonly model: string;
   readonly promptVersion: string;
@@ -290,5 +357,6 @@ export async function readScale(input: ScaleInput, fetchImpl?: typeof fetch): Pr
     throw new ModelError('invalid_output', false, `모델 응답이 스키마와 다르다: ${where}`);
   }
   const estimate = estimateScale(parsed.data, input.image.width, input.image.height);
-  return { estimate, read: parsed.data, model: result.model, promptVersion: SCALE_PROMPT_VERSION, usage: result.usage, latencyMs: result.latencyMs };
+  const guess = estimate ? null : plausibleGuess(parsed.data, input.image.width, input.image.height);
+  return { estimate, guess, read: parsed.data, model: result.model, promptVersion: SCALE_PROMPT_VERSION, usage: result.usage, latencyMs: result.latencyMs };
 }

@@ -31,6 +31,12 @@ const OPEN_RATIO = 0.6;
 const THIN_GAP = 1.6;
 /** 얇은 벽 표현으로 인정하려면 굵은 벽 득표의 이 비율 이상이어야 한다 */
 const THIN_SHARE = 0.15;
+/**
+ * 이보다 얇으면 벽 표현으로 보지 않는다.
+ * 1~3px 짜리 런은 어느 도면에나 널려 있다 — 글자 획, 가구 윤곽, 치수선, 안티에일리어싱.
+ * 이것들이 "얇은 벽"으로 뽑히면 열림 커널이 3 으로 내려가 걸러 내는 일을 아예 안 하게 된다.
+ */
+const MIN_THIN = 4;
 
 export interface WallOptions {
   /** 이 값보다 어두운 픽셀을 선으로 본다 (0~255) */
@@ -94,11 +100,11 @@ function runScores(mask: Uint8Array, w: number, h: number): Float64Array {
   return score;
 }
 
-/** 구간 [2, limit] 에서 득표가 가장 큰 길이와 그 득표 */
-function topRun(score: Float64Array, limit: number): { len: number; votes: number } {
+/** 구간 [from, limit] 에서 득표가 가장 큰 길이와 그 득표 */
+function topRun(score: Float64Array, limit: number, from = 2): { len: number; votes: number } {
   let len = 0;
   let votes = 0;
-  for (let i = 2; i <= Math.min(limit, MAX_RUN); i++) {
+  for (let i = from; i <= Math.min(limit, MAX_RUN); i++) {
     const s = score[i] ?? 0;
     if (s > votes) { votes = s; len = i; }
   }
@@ -120,8 +126,9 @@ export function estimateThicknessModes(mask: Uint8Array, w: number, h: number): 
   const score = runScores(mask, w, h);
   const top = topRun(score, MAX_RUN);
   const thick = top.len || 4;
-  const second = topRun(score, Math.floor(thick / THIN_GAP));
-  const thin = second.len >= 2 && second.votes >= top.votes * THIN_SHARE ? second.len : null;
+  const limit = Math.floor(thick / THIN_GAP);
+  const second = limit >= MIN_THIN ? topRun(score, limit, MIN_THIN) : { len: 0, votes: 0 };
+  const thin = second.len >= MIN_THIN && second.votes >= top.votes * THIN_SHARE ? second.len : null;
   return { thick, thin };
 }
 

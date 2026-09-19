@@ -110,8 +110,17 @@ export interface ScaleEstimate {
   readonly labels: readonly string[];
 }
 
+/** 치수선이 없을 때 표준 치수(문 폭·침대 등)로 어림한 값. 확정이 아니다 */
+export interface ScaleGuess {
+  readonly pxPerMeter: number;
+  readonly used: number;
+  readonly spread: number;
+  readonly basis: string;
+}
+
 export interface ScaleResponse {
   readonly estimate: ScaleEstimate | null;
+  readonly guess: ScaleGuess | null;
   readonly note: string;
   readonly model: string;
   readonly usage: { inputTokens: number; outputTokens: number; costUsd: number | null };
