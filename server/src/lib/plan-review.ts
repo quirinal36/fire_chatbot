@@ -14,6 +14,8 @@ import { log } from './log';
 
 export const REVIEW_PROMPT_VERSION = 'plan-review-v1';
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** 검토 본문은 길지 않지만 모델이 추론 토큰을 먼저 쓴다. 한도가 모자라면 본문이 잘려 빈 응답이 온다 */
+const MAX_TOKENS = 6000;
 
 /** 화면이 함께 보내는 상황 정보 */
 export const contextSchema = z.object({
@@ -198,7 +200,7 @@ export async function reviewPlan(input: ReviewInput, fetchImpl?: typeof fetch): 
         ],
       },
     ],
-    { model, schema: { name: 'PlanReview', schema: REVIEW_JSON_SCHEMA }, maxTokens: 2500, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
+    { model, schema: { name: 'PlanReview', schema: REVIEW_JSON_SCHEMA }, maxTokens: MAX_TOKENS, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
   );
   let json: unknown;
   try {

@@ -100,3 +100,28 @@ export function reviewPlan(image: Blob, width: number, height: number, context: 
   form.set('image', image, 'overlay.jpg');
   return apiJson<ReviewResponse>('/api/plans/review', { method: 'POST', body: form });
 }
+
+export interface ScaleEstimate {
+  /** 보낸 그림 기준 1m 당 픽셀 */
+  readonly pxPerMeter: number;
+  readonly used: number;
+  readonly total: number;
+  readonly spread: number;
+  readonly labels: readonly string[];
+}
+
+export interface ScaleResponse {
+  readonly estimate: ScaleEstimate | null;
+  readonly note: string;
+  readonly model: string;
+  readonly usage: { inputTokens: number; outputTokens: number; costUsd: number | null };
+  readonly latencyMs: number;
+}
+
+/** 치수선을 읽어 축척을 정한다. 읽지 못하면 estimate 가 null */
+export function readPlanScale(image: Blob, width: number, height: number): Promise<ScaleResponse> {
+  const form = new FormData();
+  form.set('meta', JSON.stringify({ width, height }));
+  form.set('image', image, 'plan.jpg');
+  return apiJson<ScaleResponse>('/api/plans/scale', { method: 'POST', body: form });
+}

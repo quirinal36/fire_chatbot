@@ -23,11 +23,27 @@ export interface WallPolygon {
 /** 이보다 어두우면 선. 회색(126) 벽도 잡고 흰 바탕·연한 격자는 버리는 값 */
 export const DEFAULT_DARK = 160;
 
+/** 두께 투표에서 세는 최대 런 길이 */
+const MAX_RUN = 64;
+/** 열림 커널 = 두께 × 이 값. 이보다 얇은 것은 사라진다 */
+const OPEN_RATIO = 0.6;
+/** 얇은 벽 표현으로 인정하려면 굵은 벽 두께의 1/이 값 이하여야 한다 */
+const THIN_GAP = 1.6;
+/** 얇은 벽 표현으로 인정하려면 굵은 벽 득표의 이 비율 이상이어야 한다 */
+const THIN_SHARE = 0.15;
+
 export interface WallOptions {
   /** 이 값보다 어두운 픽셀을 선으로 본다 (0~255) */
   readonly dark?: number;
   /** 벽 두께(px). 생략하면 이미지에서 추정 */
   readonly wallPx?: number;
+}
+
+export interface ThicknessModes {
+  /** 가장 많은 면적을 차지하는 벽 두께. 대개 외벽 */
+  readonly thick: number;
+  /** 그보다 뚜렷이 얇은 두 번째 벽 표현(빗금 내벽 등). 없으면 null */
+  readonly thin: number | null;
 }
 
 export interface Rect {
@@ -54,11 +70,10 @@ export function binarize(rgba: Uint8ClampedArray, w: number, h: number, dark: nu
  * 벽 두께 추정. 가로·세로 방향 연속 픽셀 길이의 분포에서, 픽셀 면적 기여가 가장 큰 길이를 고른다.
  * 세로 벽은 가로 방향으로 두께만큼, 가로 벽은 세로 방향으로 두께만큼 짧은 런을 아주 많이 만든다.
  */
-export function estimateThickness(mask: Uint8Array, w: number, h: number): number {
-  const MAX = 64;
-  const score = new Float64Array(MAX + 1);
+function runScores(mask: Uint8Array, w: number, h: number): Float64Array {
+  const score = new Float64Array(MAX_RUN + 1);
   const bump = (len: number): void => {
-    if (len >= 2 && len <= MAX) score[len] = (score[len] ?? 0) + len;
+    if (len >= 2 && len <= MAX_RUN) score[len] = (score[len] ?? 0) + len;
   };
   for (let y = 0; y < h; y++) {
     let run = 0;
@@ -76,13 +91,46 @@ export function estimateThickness(mask: Uint8Array, w: number, h: number): numbe
     }
     bump(run);
   }
-  let best = 4;
-  let bestScore = 0;
-  for (let len = 2; len <= MAX; len++) {
-    const s = score[len] ?? 0;
-    if (s > bestScore) { bestScore = s; best = len; }
+  return score;
+}
+
+/** 구간 [2, limit] 에서 득표가 가장 큰 길이와 그 득표 */
+function topRun(score: Float64Array, limit: number): { len: number; votes: number } {
+  let len = 0;
+  let votes = 0;
+  for (let i = 2; i <= Math.min(limit, MAX_RUN); i++) {
+    const s = score[i] ?? 0;
+    if (s > votes) { votes = s; len = i; }
   }
-  return best;
+  return { len, votes };
+}
+
+export function estimateThickness(mask: Uint8Array, w: number, h: number): number {
+  const top = topRun(runScores(mask, w, h), MAX_RUN);
+  return top.len || 4;
+}
+
+/**
+ * 한 도면 안에 벽이 두 가지 두께로 그려진 경우를 찾는다.
+ * 외벽은 짙게 채우고 내벽은 빗금으로 채우는 도면이 흔한데, 두께를 하나만 잡으면
+ * 열림 커널이 굵은 쪽에 맞춰져 얇은 쪽이 통째로 지워진다.
+ * 굵은 두께의 1/THIN_GAP 이하 구간에서 다시 최다 득표를 뽑고, 득표가 충분할 때만 인정한다.
+ */
+export function estimateThicknessModes(mask: Uint8Array, w: number, h: number): ThicknessModes {
+  const score = runScores(mask, w, h);
+  const top = topRun(score, MAX_RUN);
+  const thick = top.len || 4;
+  const second = topRun(score, Math.floor(thick / THIN_GAP));
+  const thin = second.len >= 2 && second.votes >= top.votes * THIN_SHARE ? second.len : null;
+  return { thick, thin };
+}
+
+/**
+ * 빗금(해치)으로 채운 벽을 속이 찬 띠로 만드는 닫힘 커널.
+ * 빗금 간격은 벽 두께에 따라 커지므로 두께에 비례해 잡되, 너무 키우면 가구 선까지 메운다.
+ */
+export function hatchKernel(thick: number): number {
+  return Math.min(9, Math.max(3, Math.round(thick * 0.25))) | 1;
 }
 
 /** 한 방향 침식/팽창. 누적합으로 창 안의 1 개수를 세서 커널 크기와 무관하게 O(N) */
@@ -119,9 +167,25 @@ export function morphOpen(mask: Uint8Array, w: number, h: number, k: number): Ui
   return dilate(erode(mask, w, h, k), w, h, k);
 }
 
-/** 모폴로지 닫힘. k 보다 좁은 틈이 메워진다 */
+/**
+ * 모폴로지 닫힘. k 보다 좁은 틈이 메워진다.
+ *
+ * 침식이 이미지 경계 밖을 0 으로 보기 때문에, 그냥 팽창 → 침식을 하면 가장자리에 닿은 벽이
+ * 반지름만큼 깎인다. 팽창분이 들어갈 자리를 먼저 만들어 두고(빈 테두리) 끝나면 잘라낸다.
+ */
 export function morphClose(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
-  return erode(dilate(mask, w, h, k), w, h, k);
+  const pad = k;
+  const pw = w + pad * 2;
+  const ph = h + pad * 2;
+  const big = new Uint8Array(pw * ph);
+  for (let y = 0; y < h; y++) big.set(mask.subarray(y * w, y * w + w), (y + pad) * pw + pad);
+  const closed = erode(dilate(big, pw, ph, k), pw, ph, k);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const from = (y + pad) * pw + pad;
+    out.set(closed.subarray(from, from + w), y * w);
+  }
+  return out;
 }
 
 /** 4-연결 덩어리에 번호를 매긴다. 0 은 배경. 반환 areas[label] = 픽셀 수 */
@@ -317,13 +381,40 @@ export function polygonsFromMask(mask: Uint8Array, w: number, h: number, eps = 1
   return buildPolygons(traceLoops(mask, w, h), eps);
 }
 
-/** 이미지 → 벽 마스크. 두께를 지정하지 않으면 추정한다 */
-export function wallMask(rgba: Uint8ClampedArray, w: number, h: number, opts: WallOptions = {}): { mask: Uint8Array; wallPx: number } {
+/** 두께 t 에 맞춰 얇은 것을 지운다. minArea 보다 작은 덩어리도 버린다 */
+function openAt(mask: Uint8Array, w: number, h: number, t: number, minArea: number): Uint8Array {
+  const k = Math.max(3, Math.round(t * OPEN_RATIO)) | 1;
+  return removeSmall(morphOpen(mask, w, h, k), w, h, minArea);
+}
+
+/**
+ * 이미지 → 벽 마스크.
+ *
+ * 두께를 지정하지 않으면 두 단계로 추정한다.
+ *   1. 먼저 대충 재고, 그 두께에 맞춘 작은 닫힘으로 빗금 벽의 속을 채운다.
+ *   2. 채운 마스크에서 굵은 벽과 얇은 벽 두께를 따로 찾는다.
+ * 열림은 얇은 쪽에 맞춰야 내벽이 살아남는다. 돌려주는 wallPx 는 굵은 쪽이다 —
+ * 축척 가정(벽 두께 0.2m)은 외벽 기준이라야 맞는다.
+ */
+export function wallMask(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  opts: WallOptions = {},
+): { mask: Uint8Array; wallPx: number; thinPx: number | null } {
   const binary = binarize(rgba, w, h, opts.dark ?? DEFAULT_DARK);
-  const wallPx = Math.max(2, opts.wallPx ?? estimateThickness(binary, w, h));
-  const k = Math.max(3, Math.round(wallPx * 0.6)) | 1;
-  const mask = removeSmall(morphOpen(binary, w, h, k), w, h, wallPx * wallPx * 4);
-  return { mask, wallPx };
+  if (opts.wallPx !== undefined) {
+    // 사용자나 AI 가 두께를 지정하면 그 두께 하나로만 본다
+    const t = Math.max(2, opts.wallPx);
+    return { mask: openAt(binary, w, h, t, t * t * 4), wallPx: t, thinPx: null };
+  }
+  const coarse = estimateThickness(binary, w, h);
+  const solid = morphClose(binary, w, h, hatchKernel(coarse));
+  const { thick, thin } = estimateThicknessModes(solid, w, h);
+  // 얇은 벽도 길이는 굵은 벽만큼 나온다. 그 정도 넓이가 안 되면 가구·글자로 본다
+  const minArea = thin === null ? thick * thick * 4 : thin * thick * 2;
+  const mask = openAt(solid, w, h, thin ?? thick, minArea);
+  return { mask, wallPx: thick, thinPx: thin };
 }
 
 /* ------------------------------ 편집 ------------------------------ */

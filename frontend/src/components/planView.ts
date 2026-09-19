@@ -4,7 +4,7 @@
  * 캔버스가 유지되어야 하므로 panel 은 이 요소를 innerHTML 로 다시 그리지 않고 붙였다 뗀다.
  */
 import { esc, must, onAction } from '../lib/dom';
-import { createPlan, deletePlan, getPlan, listPlans, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext } from '../api/plans';
+import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext } from '../api/plans';
 import { cutOpening, DEFAULT_DARK, fillRect, nearestWall, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
@@ -22,6 +22,8 @@ const UNDO_LIMIT = 20;
 const PYEONG = 3.3058;
 /** AI 검토에 보내는 그림의 최대 폭(px)과 격자 열 수 */
 const REVIEW_MAX_W = 1024;
+/** 축척 읽기용 그림 최대 폭. 치수 글자가 작아 검토용보다 크게 보낸다 */
+const SCALE_MAX_W = 1600;
 const REVIEW_COLS = 12;
 /** 검토 품질이 이보다 낮고 매개변수 제안이 있으면 한 번 다시 돌린다 */
 const REVIEW_RETRY_BELOW = 0.6;
@@ -59,6 +61,7 @@ export function createPlanView(actions: AppActions): PlanView {
       </label>
       <button type="button" class="btn btn--quiet btn--compact" data-action="default">기본 도면</button>
       <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
+      <button type="button" class="btn btn--quiet btn--compact" data-action="scale-read" disabled>치수 읽기</button>
       <button type="button" class="btn btn--quiet btn--compact" data-action="review" disabled>AI 검토</button>
       <span class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</span>
     </div>
@@ -162,6 +165,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const undoBtn = must<HTMLButtonElement>('[data-action="undo"]', el);
   const saveBtn = must<HTMLButtonElement>('[data-action="save-open"]', el);
   const reviewBtn = must<HTMLButtonElement>('[data-action="review"]', el);
+  const scaleBtn = must<HTMLButtonElement>('[data-action="scale-read"]', el);
   const reviewBox = must<HTMLDivElement>('.plan3d__review', el);
   const saveForm = must<HTMLFormElement>('.plan3d__save', el);
   const nameIn = must<HTMLInputElement>('[data-ctl="name"]', el);
@@ -183,9 +187,16 @@ export function createPlanView(actions: AppActions): PlanView {
   let pixels: ImageData | null = null;
   let mask: Uint8Array | null = null;
   let wallPx = 8;
+  /** 이미지에서 스스로 잰 굵은 벽 두께. 축척 가정은 항상 이 값으로 한다 —
+   *  두께 슬라이더를 내렸다고 도면이 커지면 안 된다 */
+  let autoWallPx = 8;
+  /** 얇은 벽(빗금 내벽 등)을 따로 찾았으면 그 두께 */
+  let thinPx: number | null = null;
   let userThick: number | null = null;
-  let pxPerMeter = wallPx / ASSUMED_WALL_M;
+  let pxPerMeter = autoWallPx / ASSUMED_WALL_M;
   let scaleFixed = false;
+  /** 축척을 무엇으로 맞췄는지. 상태 메시지는 곧 덮이므로 면적 옆에 남겨 둔다 */
+  let scaleSource: string | null = null;
   let mode: Mode = 'view';
   const undo: Uint8Array[] = [];
   let roomsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -255,7 +266,9 @@ export function createPlanView(actions: AppActions): PlanView {
   function renderAreas(): void {
     if (!report) { areas.hidden = true; return; }
     areas.hidden = false;
-    const scaleNote = scaleFixed ? '축척 적용됨' : `벽 두께 ${ASSUMED_WALL_M}m 가정. 축척 모드로 실제 길이를 넣으면 정확해집니다`;
+    const scaleNote = scaleFixed
+      ? `축척 ${scaleSource ?? '적용됨'} · 1m = ${pxPerMeter.toFixed(0)}px`
+      : `벽 두께 ${ASSUMED_WALL_M}m 가정. 축척 모드로 실제 길이를 넣으면 정확해집니다`;
     const rows = report.rooms
       .map((r, i) => `<li class="plan3d__room"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
         <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area))}</span></li>`)
@@ -421,6 +434,7 @@ export function createPlanView(actions: AppActions): PlanView {
     'save-close': () => { saveForm.hidden = true; },
     'load-saved': () => { if (savedSel.value) void openSaved(savedSel.value); },
     review: () => void runReview(),
+    'scale-read': () => void runScaleRead(),
     'review-apply': () => applyReview(),
     'review-close': () => { pendingReview = null; reviewBox.hidden = true; },
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
@@ -434,6 +448,7 @@ export function createPlanView(actions: AppActions): PlanView {
     if (!(m > 0) || scaleLinePx <= 0) return;
     pxPerMeter = scaleLinePx / m;
     scaleFixed = true;
+    scaleSource = '직접 지정';
     scaleForm.hidden = true;
     viewer?.setGuide(null);
     applyScale();
@@ -458,9 +473,11 @@ export function createPlanView(actions: AppActions): PlanView {
     });
     mask = result.mask;
     wallPx = result.wallPx;
+    thinPx = result.thinPx;
+    if (userThick === null) autoWallPx = result.wallPx;
     undo.length = 0;
     undoBtn.disabled = true;
-    if (!scaleFixed) pxPerMeter = wallPx / ASSUMED_WALL_M;
+    if (!scaleFixed) pxPerMeter = autoWallPx / ASSUMED_WALL_M;
     if (userThick === null) thickIn.value = String(Math.min(40, wallPx));
     thickOut.value = String(wallPx);
     const v = await ensureViewer();
@@ -480,8 +497,10 @@ export function createPlanView(actions: AppActions): PlanView {
     tools.hidden = false;
     saveBtn.disabled = false;
     reviewBtn.disabled = false;
+    scaleBtn.disabled = false;
     scheduleRooms();
-    say('벽을 세웠습니다. 끌어서 돌리고 휠로 확대합니다. 벽 추가·지우기·축척은 위 버튼으로 바꿉니다.');
+    const twoScale = thinPx === null ? '' : ` 벽이 두 가지로 그려져 있어 얇은 쪽(${thinPx}px)까지 잡았습니다.`;
+    say(`벽을 세웠습니다.${twoScale} 끌어서 돌리고 휠로 확대합니다. 벽 추가·지우기·축척은 위 버튼으로 바꿉니다.`);
   }
 
   /** autoReview 면 벽을 세운 뒤 AI 검토를 한 번 자동으로 돌린다 */
@@ -491,6 +510,7 @@ export function createPlanView(actions: AppActions): PlanView {
       return;
     }
     planGen++;
+    const gen = planGen;
     say(`${file.name} 을 분석하는 중…`);
     try {
       const bitmap = await createImageBitmap(file);
@@ -509,11 +529,18 @@ export function createPlanView(actions: AppActions): PlanView {
       userThick = null;
       userDark = null;
       scaleFixed = false;
+      scaleSource = null;
       currentPlan = null;
       setMode('view');
       await show();
-      // 도면을 먼저 화면에 띄우고, 검토는 그다음에 돌린다. 검토를 기다리며 빈 화면을 보여 주지 않는다
-      if (autoReview) void runReview({ auto: true });
+      // 도면을 먼저 화면에 띄우고, AI 는 그다음에 돌린다. 기다리며 빈 화면을 보여 주지 않는다.
+      // 축척을 먼저 맞춰야 검토가 맞는 면적·개구부 폭을 보고 판단한다
+      if (autoReview) {
+        void (async () => {
+          await runScaleRead({ auto: true });
+          if (gen === planGen) await runReview({ auto: true });
+        })();
+      }
     } catch (err) {
       say(`도면을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
@@ -617,9 +644,11 @@ export function createPlanView(actions: AppActions): PlanView {
       for (let i = 0, p = 0; i < next.length; i++, p += 4) next[i] = (md[p] ?? 255) < 128 ? 1 : 0;
       mask = next;
       wallPx = d.wallPx;
+      autoWallPx = d.wallPx;
       userThick = d.wallPx;
       pxPerMeter = d.pxPerMeter;
       scaleFixed = d.scaleFixed;
+      scaleSource = d.scaleFixed ? '저장본' : null;
       heightIn.value = String(d.wallHeightM);
       heightOut.value = heightIn.value;
       thickIn.value = String(Math.min(40, wallPx));
@@ -642,6 +671,7 @@ export function createPlanView(actions: AppActions): PlanView {
       tools.hidden = false;
       saveBtn.disabled = false;
       reviewBtn.disabled = false;
+      scaleBtn.disabled = false;
       scheduleRooms();
       say(`"${d.name}" 을 불러왔습니다.`);
     } catch (err) {
@@ -770,6 +800,49 @@ export function createPlanView(actions: AppActions): PlanView {
     return { canvas: c, scale };
   }
 
+  /**
+   * 치수선을 읽어 축척을 정한다. 벽 두께 가정보다 훨씬 정확하고, 면적은 축척의 제곱으로 움직이므로
+   * 이것이 맞아야 나머지 수치가 쓸모 있다. 읽지 못하면 가정을 그대로 두고 조용히 넘어간다.
+   */
+  async function runScaleRead(opts: { auto?: boolean } = {}): Promise<void> {
+    if (!source || !pixels || busy) return;
+    const gen = planGen;
+    busy = true;
+    scaleBtn.disabled = true;
+    if (!opts.auto) say('치수선을 읽는 중… (수십 초)');
+    try {
+      // 치수 글자는 작다. 검토용 그림(1024px)보다 크게, 겹쳐 그린 것 없이 원본 그대로 보낸다
+      const scale = Math.min(1, SCALE_MAX_W / W());
+      const c = document.createElement('canvas');
+      c.width = Math.round(W() * scale);
+      c.height = Math.round(H() * scale);
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(source, 0, 0, c.width, c.height);
+      const res = await readPlanScale(await toBlob(c, 'image/jpeg', 0.9), c.width, c.height);
+      if (gen !== planGen) return; // 읽는 사이에 다른 도면을 올렸다
+      if (!res.estimate) {
+        // 자동 호출은 조용히 넘어가지만, 왜 못 읽었는지는 남겨야 원인을 찾을 수 있다
+        console.warn('[plan] 치수 읽기: 쓸 만한 치수가 없음', res.note);
+        if (!opts.auto) say(`치수를 읽지 못했습니다. 축척 모드로 직접 맞춰 주세요. (${res.note})`, 'error');
+        return;
+      }
+      // 보낸 그림 기준 축척을 마스크 기준으로 되돌린다
+      pxPerMeter = res.estimate.pxPerMeter / scale;
+      scaleFixed = true;
+      scaleSource = `치수선 ${res.estimate.used}개`;
+      applyScale();
+      const labels = res.estimate.labels.slice(0, 4).join(', ');
+      say(`치수선으로 축척을 맞췄습니다. 1m = ${pxPerMeter.toFixed(1)}px (치수 ${res.estimate.used}개가 서로 맞음: ${labels}).`);
+    } catch (err) {
+      console.warn('[plan] 치수 읽기 실패', err);
+      if (gen === planGen && !opts.auto) say(`치수를 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      busy = false;
+      scaleBtn.disabled = mask === null;
+    }
+  }
+
   async function runReview(opts: { auto?: boolean } = {}): Promise<void> {
     if (!mask || busy) return;
     const gen = planGen;
@@ -821,6 +894,7 @@ export function createPlanView(actions: AppActions): PlanView {
       busy = false;
       // 검토가 끝나면 다시 눌러 볼 수 있게 항상 되살린다
       reviewBtn.disabled = mask === null;
+      scaleBtn.disabled = mask === null;
     }
   }
 
@@ -897,6 +971,7 @@ export function createPlanView(actions: AppActions): PlanView {
     if (rv.scale.pxPerMeter !== null && has('scale', 0)) {
       pxPerMeter = rv.scale.pxPerMeter;
       scaleFixed = true;
+      scaleSource = 'AI 어림';
       applyScale();
     } else if (maskChanged) {
       rebuild();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binarize, buildPolygons, cutOpening, estimateThickness, fillRect, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
+import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -216,5 +216,85 @@ describe('cutOpening', () => {
     fillRect(mask, w, h, (cut as NonNullable<typeof cut>).rect, 0);
     expect(mask[23 * w + 80]).toBe(0);
     expect(mask[23 * w + 70]).toBe(1);
+  });
+});
+
+/**
+ * 외벽은 짙게 채우고 내벽은 빗금으로 채운 도면. 두께를 하나만 잡으면 내벽이 통째로 사라진다.
+ */
+describe('두 가지 두께로 그린 도면', () => {
+  const w = 400;
+  const h = 300;
+  const OUTER = 20;
+  /** 내벽: 두 가는 선 사이를 빗금으로 채운 띠 */
+  const INNER = 10;
+
+  /** 여백 안에 외벽 사각형을 두고, 안을 빗금 내벽으로 가른다 */
+  function draw(): Uint8ClampedArray {
+    const px = new Uint8ClampedArray(w * h * 4).fill(255);
+    const dot = (x: number, y: number): void => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const p = (y * w + x) * 4;
+      px[p] = px[p + 1] = px[p + 2] = 0;
+    };
+    const box = (x0: number, y0: number, x1: number, y1: number): void => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) dot(x, y);
+    };
+    const M = 30; // 도면 여백
+    const [L, T, R, B] = [M, M, w - M, h - M];
+    // 외벽: 짙게 채운 테두리
+    box(L, T, R, T + OUTER);
+    box(L, B - OUTER, R, B);
+    box(L, T, L + OUTER, B);
+    box(R - OUTER, T, R, B);
+    // 내벽: 가는 선 두 줄 사이를 빗금으로 채운 띠. 세로 하나, 가로 하나
+    const band = (x0: number, y0: number, x1: number, y1: number): void => {
+      const vertical = x1 - x0 < y1 - y0;
+      if (vertical) {
+        for (let y = y0; y < y1; y++) { dot(x0, y); dot(x0 + 1, y); dot(x1 - 2, y); dot(x1 - 1, y); }
+        for (let y = y0; y < y1; y += 5) for (let i = 0; i < x1 - x0; i++) dot(x0 + i, y + i);
+      } else {
+        for (let x = x0; x < x1; x++) { dot(x, y0); dot(x, y0 + 1); dot(x, y1 - 2); dot(x, y1 - 1); }
+        for (let x = x0; x < x1; x += 5) for (let i = 0; i < y1 - y0; i++) dot(x + i, y0 + i);
+      }
+    };
+    band(195, T + OUTER, 195 + INNER, B - OUTER);
+    band(L + OUTER, 160, 195, 160 + INNER);
+    // 가구: 가는 선. 남으면 안 된다
+    for (let x = 70; x < 170; x++) { dot(x, 70); dot(x, 130); }
+    for (let y = 70; y < 130; y++) { dot(70, y); dot(170, y); }
+    return px;
+  }
+
+  it('굵은 벽과 얇은 벽을 따로 찾는다', () => {
+    const bin = binarize(draw(), w, h, DEFAULT_DARK);
+    // 빗금 띠는 가로로 자르면 얇은 런만 남아 두께 투표에 제 두께로 끼지 못한다
+    const solid = morphClose(bin, w, h, hatchKernel(estimateThickness(bin, w, h)));
+    const modes = estimateThicknessModes(solid, w, h);
+    expect(modes.thick).toBe(OUTER);
+    expect(modes.thin).not.toBeNull();
+    expect(modes.thin).toBeGreaterThanOrEqual(INNER - 2);
+    expect(modes.thin).toBeLessThanOrEqual(INNER + 2);
+  });
+
+  it('빗금 내벽을 남기고 가구는 버린다', () => {
+    const { mask, wallPx, thinPx } = wallMask(draw(), w, h);
+    // 축척 가정은 외벽 기준이라야 맞다
+    expect(wallPx).toBe(OUTER);
+    expect(thinPx).not.toBeNull();
+    // 세로 내벽이 위아래로 이어져 있다
+    for (const y of [80, 150, 240]) expect(mask[y * w + 200]).toBe(1);
+    // 가로 내벽도 남았다
+    expect(mask[165 * w + 120]).toBe(1);
+    // 가구는 사라졌다
+    expect(mask[70 * w + 120]).toBe(0);
+    expect(mask[100 * w + 70]).toBe(0);
+  });
+
+  it('두께를 지정하면 그 두께 하나로만 본다 — 굵게 잡으면 내벽이 사라진다', () => {
+    const { mask, thinPx } = wallMask(draw(), w, h, { wallPx: OUTER });
+    expect(thinPx).toBeNull();
+    expect(mask[150 * w + 200]).toBe(0);
+    expect(mask[150 * w + 35]).toBe(1);
   });
 });
