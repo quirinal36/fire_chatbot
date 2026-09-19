@@ -22,6 +22,8 @@ export interface PlanRow {
   scale_fixed: boolean;
   scale_status: 'assumed' | 'estimated' | 'auto' | 'confirmed';
   wall_height_m: number;
+  /** 판정(개구부 종류·문·창·구역 이름). 화면이 정한 형식이며 서버는 크기와 JSON 여부만 본다 */
+  annotations: unknown;
   image_path: string;
   mask_path: string;
   created_at: string;
@@ -40,6 +42,22 @@ export const metaSchema = z.object({
     .transform((v) => v === 'true' || v === '1'),
   scaleStatus: z.enum(['assumed', 'estimated', 'auto', 'confirmed']).default('assumed'),
   wallHeightM: z.coerce.number().positive().max(20).default(2.7),
+  /** 판정 JSON. 64KB 까지. 형식은 화면이 정하고 서버는 JSON 객체인지만 본다 */
+  annotations: z
+    .string()
+    .max(65536)
+    .optional()
+    .transform((v, ctx) => {
+      if (v === undefined || v === '') return null;
+      try {
+        const parsed: unknown = JSON.parse(v);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object');
+        return parsed as Record<string, unknown>;
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'annotations 는 JSON 객체여야 합니다' });
+        return z.NEVER;
+      }
+    }),
 });
 export type PlanMeta = z.infer<typeof metaSchema>;
 
@@ -157,6 +175,7 @@ function columnsOf(m: PlanMeta) {
     scale_fixed: m.scaleFixed,
     scale_status: m.scaleStatus,
     wall_height_m: m.wallHeightM,
+    annotations: m.annotations ?? null,
   };
 }
 
@@ -180,6 +199,7 @@ export async function detailOf(db: SupabaseClient, r: PlanRow) {
     scaleFixed: r.scale_fixed,
     scaleStatus: r.scale_status,
     wallHeightM: r.wall_height_m,
+    annotations: r.annotations ?? null,
     imageUrl: urlOf(r.image_path),
     maskUrl: urlOf(r.mask_path),
   };

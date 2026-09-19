@@ -24,7 +24,7 @@ export const contextSchema = z.object({
   grid: z.object({ cols: z.number().int().min(2).max(26), rows: z.number().int().min(2).max(40) }),
   /** 지금 쓴 매개변수 */
   params: z.object({ dark: z.number().int().min(0).max(255), wallPx: z.number().int().min(1).max(256), pxPerMeter: z.number().positive() }),
-  openings: z.array(z.object({ id: z.number().int().min(1), widthM: z.number().nonnegative(), cell: z.string().max(4) })).max(80),
+  openings: z.array(z.object({ id: z.number().int().min(1), widthM: z.number().nonnegative(), cell: z.string().max(4) })).max(120),
   rooms: z.array(z.object({ id: z.number().int().min(1), areaM2: z.number().nonnegative(), cell: z.string().max(4) })).max(60),
 });
 export type ReviewContext = z.infer<typeof contextSchema>;
@@ -49,7 +49,7 @@ export const reviewSchema = z.object({
   summary: text(400),
   falseWalls: list(z.object({ cell: text(8), what: text(80) }), 60),
   missingWalls: list(z.object({ from: pt, to: pt, why: text(80) }), 40),
-  openings: list(z.object({ id: z.coerce.number().int(), kind: z.enum(['door', 'window', 'open']) }), 80),
+  openings: list(z.object({ id: z.coerce.number().int(), kind: z.enum(['door', 'window', 'open', 'not_opening']) }), 120),
   rooms: list(z.object({ id: z.coerce.number().int(), name: text(40) }), 60),
   scale: z
     .object({ pxPerMeter: z.coerce.number().nullable(), basis: text(120) })
@@ -87,8 +87,8 @@ export const REVIEW_JSON_SCHEMA = {
     },
     openings: {
       type: 'array',
-      description: '파란 번호로 표시한 개구부의 종류',
-      items: { type: 'object', additionalProperties: false, required: ['id', 'kind'], properties: { id: { type: 'integer' }, kind: { type: 'string', enum: ['door', 'window', 'open'] } } },
+      description: '파란 번호로 표시한 개구부 후보의 종류',
+      items: { type: 'object', additionalProperties: false, required: ['id', 'kind'], properties: { id: { type: 'integer' }, kind: { type: 'string', enum: ['door', 'window', 'open', 'not_opening'] } } },
     },
     rooms: {
       type: 'array',
@@ -125,7 +125,8 @@ export function buildPrompt(ctx: ReviewContext, imageWidth: number, imageHeight:
   return [
     '당신은 건축 평면도 검토자입니다. 첨부 그림은 2D 평면도 원본 위에 프로그램이 자동으로 찾은 벽을 빨간색 반투명으로 겹친 것입니다.',
     `그림 위에 ${ctx.grid.cols}×${ctx.grid.rows} 격자를 그렸고 칸 이름은 열 글자(${cols}) + 행 숫자(1~${ctx.grid.rows})입니다. 예: C4.`,
-    '파란 사각형과 숫자는 벽이 끊긴 개구부, 초록 원과 숫자는 프로그램이 나눈 구역입니다.',
+    '파란 선분과 숫자는 벽이 끊긴 자리(개구부 후보), 초록 원과 숫자는 프로그램이 나눈 구역입니다.',
+    '후보는 벽 끝에서 가까운 벽까지 그은 것이라, 실제 문·창 외에 트인 곳이나 개구부가 아닌 자리도 섞여 있습니다.',
     `그림 크기 ${imageWidth}×${imageHeight}px. 지금 매개변수: 어두움 기준 ${ctx.params.dark}, 벽 두께 ${ctx.params.wallPx}px, 1m 당 ${ctx.params.pxPerMeter.toFixed(1)}px (검토 ${ctx.round}회째).`,
     `개구부 목록: ${openings}`,
     `구역 목록: ${rooms}`,
@@ -134,7 +135,7 @@ export function buildPrompt(ctx: ReviewContext, imageWidth: number, imageHeight:
     '1. quality: 빨간 벽이 실제 벽과 맞는 정도 0~1. 가구·계단·글자가 벽으로 잡혔거나 벽이 빠졌으면 낮춥니다.',
     '2. falseWalls: 벽이 아닌데 빨갛게 칠해진 칸. 책상·의자·계단·엘리베이터·글자·해치 무늬가 흔합니다. 칸 하나씩.',
     '3. missingWalls: 도면에 벽이 있는데 빨강이 없는 곳. 벽의 양 끝을 이미지 폭·높이를 1 로 본 좌표로. 창·문 자리는 벽이 아니므로 넣지 않습니다.',
-    '4. openings: 파란 번호마다 door(문. 호나 여닫이 표시), window(창. 벽 사이 가는 선·이중선), open(벽 없이 트인 곳).',
+    '4. openings: 파란 번호마다 door(문. 호나 여닫이 표시), window(창. 벽 사이 가는 선·이중선), open(벽 없이 트인 곳. 거실·주방처럼 한 공간이 이어짐), not_opening(개구부가 아님. 벽 끝과 먼 벽 사이의 허공, 가구·기호 사이 틈). 문·창이면 그 자리에서 방이 나뉘고, open·not_opening 이면 나뉘지 않습니다.',
     '5. rooms: 초록 번호마다 도면 글자를 읽어 이름을 붙입니다 (예: 주방, 회의실, 복도, 화장실, 계단실). 글자가 없으면 모양과 설비로 추정합니다.',
     '6. scale: 치수 글자가 있으면 그것으로, 없으면 일반 문 폭 0.9m 또는 화장실 변기·계단 폭 같은 표준 치수로 1m 당 픽셀을 추정합니다. 근거가 없으면 null.',
     '7. params: 벽이 많이 빠졌으면 어두움 기준을 올리거나 벽 두께를 낮추고, 가구가 많이 잡혔으면 벽 두께를 올리라고 권합니다. 지금이 좋으면 null.',

@@ -18,6 +18,8 @@ export interface PlanDetail extends PlanSummary {
   readonly scaleFixed: boolean;
   readonly scaleStatus: ScaleStatus;
   readonly wallHeightM: number;
+  /** 저장한 판정(개구부 종류·문·창·구역 이름). 구버전 저장본은 null */
+  readonly annotations: unknown;
   readonly imageUrl: string;
   readonly maskUrl: string;
 }
@@ -31,6 +33,8 @@ export interface PlanPayload {
   readonly scaleFixed: boolean;
   readonly scaleStatus: ScaleStatus;
   readonly wallHeightM: number;
+  /** 판정 JSON 문자열 */
+  readonly annotations?: string;
   readonly image: Blob;
   readonly mask: Blob;
 }
@@ -45,6 +49,7 @@ function formOf(p: PlanPayload): FormData {
   form.set('scaleFixed', String(p.scaleFixed));
   form.set('scaleStatus', p.scaleStatus);
   form.set('wallHeightM', String(p.wallHeightM));
+  if (p.annotations) form.set('annotations', p.annotations);
   form.set('image', p.image, 'image');
   form.set('mask', p.mask, 'mask.png');
   return form;
@@ -86,7 +91,7 @@ export interface PlanReview {
   readonly summary: string;
   readonly falseWalls: readonly { cell: string; what: string }[];
   readonly missingWalls: readonly { from: { x: number; y: number }; to: { x: number; y: number }; why: string }[];
-  readonly openings: readonly { id: number; kind: 'door' | 'window' | 'open' }[];
+  readonly openings: readonly { id: number; kind: 'door' | 'window' | 'open' | 'not_opening' }[];
   readonly rooms: readonly { id: number; name: string }[];
   readonly scale: { pxPerMeter: number | null; basis: string };
   readonly params: { dark: number | null; wallPx: number | null };

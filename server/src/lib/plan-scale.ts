@@ -9,6 +9,7 @@
  * 말하고, 축척 계산과 검증은 여기서 한다. 모델 좌표는 몇 픽셀씩 어긋나지만, 한 도면에 치수가 여럿이라
  * 구간마다 1m 당 픽셀을 따로 구해 중앙값을 쓰면 잘못 읽은 하나가 결과를 흔들지 못한다.
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { callChatModel, ModelError } from './chat/openrouter';
 import { env } from './env';
@@ -367,4 +368,22 @@ export async function readScale(input: ScaleInput, fetchImpl?: typeof fetch): Pr
   const estimate = estimateScale(parsed.data, input.image.width, input.image.height);
   const guess = estimate ? null : plausibleGuess(parsed.data, input.image.width, input.image.height);
   return { estimate, guess, read: parsed.data, model: result.model, promptVersion: SCALE_PROMPT_VERSION, usage: result.usage, latencyMs: result.latencyMs };
+}
+
+/** 치수 읽기 호출도 검토와 같은 표에 남긴다. 그래야 하루 예산 합계에 잡힌다 */
+export async function recordScale(db: SupabaseClient, ownerId: string, outcome: ScaleOutcome | null, errorCode: string | null, model: string): Promise<void> {
+  const { error } = await db.from('plan_reviews').insert({
+    owner_id: ownerId,
+    plan_id: null,
+    kind: 'scale',
+    model: outcome?.model ?? model,
+    round: 1,
+    quality: null,
+    input_tokens: outcome?.usage.inputTokens ?? 0,
+    output_tokens: outcome?.usage.outputTokens ?? 0,
+    cost_usd: outcome?.usage.costUsd ?? null,
+    latency_ms: outcome?.latencyMs ?? null,
+    error_code: errorCode,
+  });
+  if (error) log('error', 'plan scale record failed', { err: error.message });
 }
