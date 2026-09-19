@@ -20,6 +20,7 @@ export interface PlanRow {
   wall_px: number;
   px_per_meter: number;
   scale_fixed: boolean;
+  scale_status: 'assumed' | 'estimated' | 'auto' | 'confirmed';
   wall_height_m: number;
   image_path: string;
   mask_path: string;
@@ -37,6 +38,7 @@ export const metaSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true' || v === '1'),
+  scaleStatus: z.enum(['assumed', 'estimated', 'auto', 'confirmed']).default('assumed'),
   wallHeightM: z.coerce.number().positive().max(20).default(2.7),
 });
 export type PlanMeta = z.infer<typeof metaSchema>;
@@ -153,6 +155,7 @@ function columnsOf(m: PlanMeta) {
     wall_px: m.wallPx,
     px_per_meter: m.pxPerMeter,
     scale_fixed: m.scaleFixed,
+    scale_status: m.scaleStatus,
     wall_height_m: m.wallHeightM,
   };
 }
@@ -175,6 +178,7 @@ export async function detailOf(db: SupabaseClient, r: PlanRow) {
     wallPx: r.wall_px,
     pxPerMeter: r.px_per_meter,
     scaleFixed: r.scale_fixed,
+    scaleStatus: r.scale_status,
     wallHeightM: r.wall_height_m,
     imageUrl: urlOf(r.image_path),
     maskUrl: urlOf(r.mask_path),

@@ -1,6 +1,8 @@
 /** 도면 저장·불러오기 (도면 탭). 파일은 multipart 로 올리고, 내려받을 때는 서명된 주소를 받는다 */
 import { apiFetch, apiJson } from './client';
 
+export type ScaleStatus = 'assumed' | 'estimated' | 'auto' | 'confirmed';
+
 export interface PlanSummary {
   readonly id: string;
   readonly name: string;
@@ -14,6 +16,7 @@ export interface PlanDetail extends PlanSummary {
   readonly wallPx: number;
   readonly pxPerMeter: number;
   readonly scaleFixed: boolean;
+  readonly scaleStatus: ScaleStatus;
   readonly wallHeightM: number;
   readonly imageUrl: string;
   readonly maskUrl: string;
@@ -26,6 +29,7 @@ export interface PlanPayload {
   readonly wallPx: number;
   readonly pxPerMeter: number;
   readonly scaleFixed: boolean;
+  readonly scaleStatus: ScaleStatus;
   readonly wallHeightM: number;
   readonly image: Blob;
   readonly mask: Blob;
@@ -39,6 +43,7 @@ function formOf(p: PlanPayload): FormData {
   form.set('wallPx', String(p.wallPx));
   form.set('pxPerMeter', String(p.pxPerMeter));
   form.set('scaleFixed', String(p.scaleFixed));
+  form.set('scaleStatus', p.scaleStatus);
   form.set('wallHeightM', String(p.wallHeightM));
   form.set('image', p.image, 'image');
   form.set('mask', p.mask, 'mask.png');

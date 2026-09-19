@@ -6,6 +6,8 @@
 
 진행 현황: [진행 현황과 다음 작업](progress.md)에 구현된 범위·확정된 결정·다음 작업을 정리했다. 이슈별 기록은 각 `ISS-*` 절의 진행 기록을 참고한다.
 
+도면 화면 후속 작업: [초보자 UX 개선 이슈](plan-ui-ux-issues.md)에 화면 관찰 근거, 작업 순서와 `UX-001~007`의 완료 조건을 정리했다. 해당 작업은 GitHub 미등록 제안이다.
+
 각 `ISS-*` 절을 독립 GitHub 이슈로 등록한다. 절 제목은 이슈 제목, 메타데이터 다음 문장은 작업 범위, 체크리스트는 완료 조건이다. 선행 작업은 완료에 필요한 의존성으로, 설계·fixture 준비는 먼저 진행할 수 있다. 모든 이슈는 미착수이며 담당자 미지정이다.
 
 추천 labels: `priority:P0`, `priority:P1`; `type:decision`, `type:spike`, `type:feature`, `type:test`, `type:docs`, `type:ops`; `area:platform`, `area:ingestion`, `area:data`, `area:search`, `area:chat`, `area:rules`, `area:admin`, `area:security`. `needs:review`는 담당자 검토가 필요한 항목에 사용한다. 라벨은 등록 시 생성한다.

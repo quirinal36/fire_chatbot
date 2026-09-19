@@ -1346,8 +1346,19 @@
 
 .plan3d__bar {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.plan3d__file-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.plan3d__file-tools .btn {
+  white-space: nowrap;
 }
 
 .plan3d__upload {
@@ -1356,8 +1367,59 @@
 }
 
 .plan3d__status {
+  margin: 0;
   font: var(--text-body-sm);
   color: var(--ink-muted);
+}
+
+.plan3d__recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.plan3d__journey {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.plan3d__origin,
+.plan3d__steps {
+  margin: 0;
+  font: var(--text-micro);
+}
+
+.plan3d__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) 0 0;
+  list-style: none;
+  color: var(--ink-muted);
+}
+
+.plan3d__steps .is-done {
+  color: var(--success);
+}
+
+.plan3d__steps .is-current {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.case__missing {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font: var(--text-body-sm);
+}
+
+.case__results {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .plan3d__stage {
@@ -1442,6 +1504,15 @@
   gap: var(--space-2);
 }
 
+.plan3d__context {
+  display: flex;
+  flex: 0 0 108px;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .plan3d__modes {
   display: flex;
   flex-wrap: wrap;
@@ -1464,10 +1535,18 @@
 }
 
 .plan3d__edit,
-.plan3d__scale {
+.plan3d__scale,
+.plan3d__door {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-3);
+}
+
+.plan3d__edit .plan3d__field,
+.plan3d__door .plan3d__field,
+.plan3d__scale .plan3d__field {
+  flex: 1 1 12rem;
 }
 
 .plan3d__field--num input {
@@ -1489,6 +1568,16 @@
 .plan3d__total {
   margin: 0 0 var(--space-2);
   font: var(--text-body-sm);
+}
+
+.plan3d__scale-state {
+  margin: 0 0 var(--space-2);
+  font: var(--text-micro);
+  color: var(--ink-muted);
+}
+
+.plan3d__scale-state strong {
+  color: var(--accent);
 }
 
 .plan3d__sub {
@@ -1573,10 +1662,4 @@
   align-items: flex-start;
   gap: var(--space-2);
   cursor: pointer;
-}
-
-.plan3d__door {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-3);
 }

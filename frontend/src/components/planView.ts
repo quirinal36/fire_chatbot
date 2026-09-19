@@ -4,7 +4,8 @@
  * 캔버스가 유지되어야 하므로 panel 은 이 요소를 innerHTML 로 다시 그리지 않고 붙였다 뗀다.
  */
 import { esc, must, onAction } from '../lib/dom';
-import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext } from '../api/plans';
+import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext, type ScaleStatus } from '../api/plans';
+import { ApiError } from '../api/client';
 import { cutOpening, DEFAULT_DARK, fillRect, nearestWall, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
@@ -48,23 +49,27 @@ export interface PlanView {
   dispose(): void;
 }
 
-const fmtArea = (m2: number): string => `${m2.toFixed(1)}㎡ (${(m2 / PYEONG).toFixed(1)}평)`;
+const fmtArea = (m2: number, approximate = false): string => `${approximate ? '약 ' : ''}${m2.toFixed(1)}㎡ (${(m2 / PYEONG).toFixed(1)}평)`;
 
 export function createPlanView(actions: AppActions): PlanView {
   const el = document.createElement('div');
   el.className = 'plan3d';
   el.innerHTML = `
     <div class="plan3d__bar">
-      <label class="btn btn--compact plan3d__upload">
-        도면 올리기
-        <input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" aria-label="도면 이미지 선택">
-      </label>
-      <button type="button" class="btn btn--quiet btn--compact" data-action="default">기본 도면</button>
-      <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
-      <button type="button" class="btn btn--quiet btn--compact" data-action="scale-read" disabled>치수 읽기</button>
-      <button type="button" class="btn btn--quiet btn--compact" data-action="review" disabled>AI 검토</button>
-      <span class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</span>
+      <div class="plan3d__file-tools" aria-label="도면 파일과 분석 도구">
+        <label class="btn btn--compact plan3d__upload">
+          도면 올리기
+          <input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" aria-label="도면 이미지 선택">
+        </label>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="default">예시 도면</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="scale-read" disabled>도면의 치수 자동 읽기</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="review" disabled>도면 인식 검토</button>
+      </div>
+      <p class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</p>
+      <div class="plan3d__recovery" hidden></div>
     </div>
+    <div class="plan3d__journey" hidden aria-label="도면 검토 진행 상태"></div>
     <form class="plan3d__save" hidden>
       <label class="plan3d__field plan3d__field--num plan3d__field--grow">
         <span>도면 이름</span>
@@ -85,42 +90,45 @@ export function createPlanView(actions: AppActions): PlanView {
     </div>
     <div class="plan3d__tools" hidden>
       <div class="plan3d__modes" role="group" aria-label="편집 모드">
-        <button type="button" class="btn btn--compact" data-action="mode" data-mode="view" aria-pressed="true">보기</button>
+        <button type="button" class="btn btn--compact" data-action="mode" data-mode="view" aria-pressed="true">도면 둘러보기</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="add" aria-pressed="false">벽 추가</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="erase" aria-pressed="false">벽 지우기</button>
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="door" aria-pressed="false">문 추가</button>
-        <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">축척</button>
+        <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">실제 길이 맞추기</button>
       </div>
       <div class="plan3d__modes">
+        <button type="button" class="btn btn--quiet btn--compact" data-action="finish-edit" hidden>편집 끝내기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="undo" disabled>되돌리기</button>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="top">위에서 보기</button>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="fit">전체 보기</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="top">평면 보기</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="fit">3D 보기</button>
       </div>
     </div>
-    <p class="plan3d__help" hidden></p>
-    <div class="plan3d__edit" hidden>
-      <label class="plan3d__field plan3d__field--num">
-        <span>길이 (m, 비우면 드래그한 만큼)</span>
-        <input type="number" data-ctl="length" min="0.1" step="0.1" placeholder="예: 3.5">
-      </label>
-      <label class="plan3d__field plan3d__field--num">
-        <span>벽 두께 (m)</span>
-        <input type="number" data-ctl="thickM" min="0.05" step="0.05" value="${ASSUMED_WALL_M}">
-      </label>
+    <div class="plan3d__context" aria-live="polite">
+      <p class="plan3d__help" hidden></p>
+      <div class="plan3d__edit" hidden>
+        <label class="plan3d__field plan3d__field--num">
+          <span>길이 (m, 비우면 드래그한 만큼)</span>
+          <input type="number" data-ctl="length" min="0.1" step="0.1" placeholder="예: 3.5">
+        </label>
+        <label class="plan3d__field plan3d__field--num">
+          <span>벽 두께 (m)</span>
+          <input type="number" data-ctl="thickM" min="0.05" step="0.05" value="${ASSUMED_WALL_M}">
+        </label>
+      </div>
+      <div class="plan3d__door" hidden>
+        <label class="plan3d__field plan3d__field--num">
+          <span>문 폭 (m, 끌면 끈 만큼)</span>
+          <input type="number" data-ctl="doorM" min="0.3" max="6" step="0.1" value="${DEFAULT_DOOR_M}">
+        </label>
+      </div>
+      <form class="plan3d__scale" hidden>
+        <label class="plan3d__field plan3d__field--num">
+          <span>그은 선의 실제 길이 (m)</span>
+          <input type="number" data-ctl="scaleM" min="0.1" step="0.01" required placeholder="예: 4.2">
+        </label>
+        <button type="submit" class="btn btn--accent btn--compact">적용</button>
+      </form>
     </div>
-    <div class="plan3d__door" hidden>
-      <label class="plan3d__field plan3d__field--num">
-        <span>문 폭 (m, 끌면 끈 만큼)</span>
-        <input type="number" data-ctl="doorM" min="0.3" max="6" step="0.1" value="${DEFAULT_DOOR_M}">
-      </label>
-    </div>
-    <form class="plan3d__scale" hidden>
-      <label class="plan3d__field plan3d__field--num">
-        <span>그은 선의 실제 길이 (m)</span>
-        <input type="number" data-ctl="scaleM" min="0.1" step="0.01" required placeholder="예: 4.2">
-      </label>
-      <button type="submit" class="btn btn--accent btn--compact">적용</button>
-    </form>
     <div class="plan3d__stage" data-empty="true">
       <p class="plan3d__hint">이미지를 여기에 끌어다 놓아도 됩니다.<br>도면은 서버로 보내지 않고 이 브라우저 안에서만 처리합니다.</p>
     </div>
@@ -145,6 +153,8 @@ export function createPlanView(actions: AppActions): PlanView {
 
   const input = must<HTMLInputElement>('input[type="file"]', el);
   const status = must<HTMLSpanElement>('.plan3d__status', el);
+  const recovery = must<HTMLDivElement>('.plan3d__recovery', el);
+  const journey = must<HTMLDivElement>('.plan3d__journey', el);
   const tools = must<HTMLDivElement>('.plan3d__tools', el);
   const help = must<HTMLParagraphElement>('.plan3d__help', el);
   const editBox = must<HTMLDivElement>('.plan3d__edit', el);
@@ -163,6 +173,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const heightOut = must<HTMLOutputElement>('[data-out="height"]', el);
   const thickOut = must<HTMLOutputElement>('[data-out="thick"]', el);
   const undoBtn = must<HTMLButtonElement>('[data-action="undo"]', el);
+  const finishEditBtn = must<HTMLButtonElement>('[data-action="finish-edit"]', el);
   const saveBtn = must<HTMLButtonElement>('[data-action="save-open"]', el);
   const reviewBtn = must<HTMLButtonElement>('[data-action="review"]', el);
   const scaleBtn = must<HTMLButtonElement>('[data-action="scale-read"]', el);
@@ -184,6 +195,8 @@ export function createPlanView(actions: AppActions): PlanView {
 
   let viewer: Viewer | null = null;
   let source: HTMLCanvasElement | null = null;
+  let sourceName = '';
+  let sourceKind: 'sample' | 'upload' | 'saved' | null = null;
   let pixels: ImageData | null = null;
   let mask: Uint8Array | null = null;
   let wallPx = 8;
@@ -195,8 +208,10 @@ export function createPlanView(actions: AppActions): PlanView {
   let userThick: number | null = null;
   let pxPerMeter = autoWallPx / ASSUMED_WALL_M;
   let scaleFixed = false;
-  /** 축척을 무엇으로 맞췄는지. 상태 메시지는 곧 덮이므로 면적 옆에 남겨 둔다 */
+  /** 축척의 근거. 상태 메시지는 곧 덮이므로 면적 옆에 남겨 둔다 */
   let scaleSource: string | null = null;
+  /** 자동 인식과 사용자의 확인을 구분한다. 면적은 이 값이 확인 전이면 추정으로 표시한다. */
+  let scaleStatus: ScaleStatus = 'assumed';
   let mode: Mode = 'view';
   const undo: Uint8Array[] = [];
   let roomsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,6 +222,7 @@ export function createPlanView(actions: AppActions): PlanView {
   let userId: string | null = null;
   let saved: PlanSummary[] = [];
   let busy = false;
+  let retrySave: 'create' | 'update' | null = null;
   /** 어두움 기준. AI 가 권하면 바뀐다 */
   let userDark: number | null = null;
   /** 창문으로 판정된 개구부(픽셀 사각형) */
@@ -217,12 +233,41 @@ export function createPlanView(actions: AppActions): PlanView {
   let roomNames: Record<number, string> = {};
   let lastOpenings: Opening[] = [];
   let pendingReview: PlanReview | null = null;
+  let recognitionConfirmed = false;
   /** 도면을 새로 올릴 때마다 올라간다. 늦게 도착한 AI 검토 결과를 버리는 데 쓴다 */
   let planGen = 0;
 
   function say(text: string, tone: 'info' | 'error' = 'info'): void {
     status.textContent = text;
     status.classList.toggle('tone-flag', tone === 'error');
+    recovery.replaceChildren();
+    recovery.hidden = true;
+  }
+
+  function offerRecovery(text: string, actions: readonly ('scale-mode' | 'scale-retry' | 'login' | 'save-retry')[]): void {
+    say(text, 'error');
+    const labels = {
+      'scale-mode': '직접 길이 입력',
+      'scale-retry': '다시 시도',
+      login: '로그인',
+      'save-retry': '다시 저장',
+    } as const;
+    recovery.innerHTML = actions.map((action) => `<button type="button" class="btn btn--quiet btn--compact" data-action="${action}">${labels[action]}</button>`).join('');
+    recovery.hidden = false;
+  }
+
+  function renderJourney(): void {
+    if (!pixels || sourceKind === null) { journey.hidden = true; return; }
+    journey.hidden = false;
+    const origin = sourceKind === 'sample' ? '예시 도면' : sourceKind === 'saved' ? '저장한 도면' : '내 도면';
+    const scaleDone = scaleStatus === 'confirmed';
+    journey.innerHTML = `<p class="plan3d__origin"><strong>${esc(origin)}</strong> · ${esc(sourceName)}</p>
+      <ol class="plan3d__steps">
+        <li class="is-done">1. 도면 준비</li>
+        <li class="${scaleDone ? 'is-done' : 'is-current'}">2. ${scaleDone ? '실제 길이 확인됨' : '실제 길이 확인 필요'}${scaleDone ? '' : ' <button type="button" class="link" data-action="scale-mode">실제 길이 맞추기</button>'}</li>
+        <li class="${recognitionConfirmed ? 'is-done' : scaleDone ? 'is-current' : ''}">3. ${recognitionConfirmed ? '인식 결과 확인됨' : '인식 결과 확인 필요'}${recognitionConfirmed ? '' : ' <button type="button" class="link" data-action="recognition-confirm">맞아요</button> <button type="button" class="link" data-action="recognition-edit">수정하기</button>'}</li>
+        <li class="${recognitionConfirmed && scaleDone ? 'is-current' : ''}">4. 소방시설 검토</li>
+      </ol>`;
   }
 
   const W = (): number => pixels?.width ?? 0;
@@ -266,17 +311,42 @@ export function createPlanView(actions: AppActions): PlanView {
   function renderAreas(): void {
     if (!report) { areas.hidden = true; return; }
     areas.hidden = false;
-    const scaleNote = scaleFixed
-      ? `축척 ${scaleSource ?? '적용됨'} · 1m = ${pxPerMeter.toFixed(0)}px`
-      : `벽 두께 ${ASSUMED_WALL_M}m 가정. 축척 모드로 실제 길이를 넣으면 정확해집니다`;
+    const approximate = scaleStatus !== 'confirmed';
+    const scale = {
+      assumed: {
+        label: '임시 추정 · 실제 길이 미설정',
+        detail: `벽 두께 ${ASSUMED_WALL_M}m 가정`,
+        action: '실제 길이 맞추기',
+      },
+      estimated: {
+        label: '추정 · 표준 치수 기준',
+        detail: scaleSource ?? '표준 치수로 어림',
+        action: '실제 길이 맞추기',
+      },
+      auto: {
+        label: '자동 인식 · 확인 필요',
+        detail: scaleSource ?? '도면의 치수를 읽음',
+        action: '읽은 치수 확인',
+      },
+      confirmed: {
+        label: '사용자 확인 · 입력 치수 기준',
+        detail: scaleSource ?? '직접 입력',
+        action: '기준 길이 수정',
+      },
+    }[scaleStatus];
     const rows = report.rooms
       .map((r, i) => `<li class="plan3d__room"><span class="plan3d__swatch" style="--hue:${[18, 200, 140, 280, 40, 320, 100, 240, 0, 170, 60, 300][i % 12]}"></span>
-        <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area))}</span></li>`)
+        <span>${esc(roomNames[r.id] ?? `구역 ${r.id}`)}</span><span class="plan3d__room-area">${esc(fmtArea(r.area, approximate))}</span></li>`)
       .join('');
     areas.innerHTML = `
-      <p class="plan3d__total">바닥 면적 <strong>${esc(fmtArea(report.floorArea))}</strong>
-        <span class="plan3d__sub">· 벽 포함 ${esc(fmtArea(report.footprintArea))} · ${esc(scaleNote)}</span></p>
+      <p class="plan3d__total">바닥 면적 <strong>${esc(fmtArea(report.floorArea, approximate))}</strong>
+        <span class="plan3d__sub">· 벽 포함 ${esc(fmtArea(report.footprintArea, approximate))}</span></p>
+      <p class="plan3d__scale-state"><strong>${esc(scale.label)}</strong> · ${esc(scale.detail)} · 1m = ${pxPerMeter.toFixed(1)}px
+        ${scaleStatus === 'auto'
+          ? '<button type="button" class="link" data-action="scale-confirm">읽은 치수 확인</button>'
+          : `<button type="button" class="link" data-action="scale-mode">${esc(scale.action)}</button>`}</p>
       ${report.rooms.length ? `<ol class="plan3d__rooms">${rows}</ol>` : '<p class="plan3d__sub">닫힌 구역을 찾지 못했습니다. 벽을 그어 방을 닫으면 면적이 나옵니다.</p>'}`;
+    renderJourney();
   }
 
   function pushUndo(): void {
@@ -410,6 +480,7 @@ export function createPlanView(actions: AppActions): PlanView {
     help.hidden = next === 'view';
     editBox.hidden = next !== 'add';
     doorBox.hidden = next !== 'door';
+    finishEditBtn.hidden = next === 'view';
     if (next !== 'scale') { scaleForm.hidden = true; viewer?.setGuide(null); }
     viewer?.setEditing(next === 'view' ? null : editHandlers);
     if (wasView && next !== 'view') viewer?.topView();
@@ -422,6 +493,7 @@ export function createPlanView(actions: AppActions): PlanView {
       if (hit) setMode(hit);
     },
     undo: () => popUndo(),
+    'finish-edit': () => setMode('view'),
     default: () => void loadDefault(true),
     'save-open': () => {
       if (!mask) return;
@@ -435,6 +507,25 @@ export function createPlanView(actions: AppActions): PlanView {
     'load-saved': () => { if (savedSel.value) void openSaved(savedSel.value); },
     review: () => void runReview(),
     'scale-read': () => void runScaleRead(),
+    'scale-mode': () => setMode('scale'),
+    'scale-retry': () => void runScaleRead(),
+    login: () => actions.openLogin(),
+    'save-retry': () => { if (retrySave) void save(retrySave); },
+    'scale-confirm': () => {
+      if (scaleStatus !== 'auto') return;
+      scaleStatus = 'confirmed';
+      renderAreas();
+      say('자동으로 읽은 치수를 확인했습니다. 기준 길이는 언제든 수정할 수 있습니다.');
+    },
+    'recognition-confirm': () => {
+      recognitionConfirmed = true;
+      renderJourney();
+      say('도면 인식 결과를 확인했습니다. 벽이나 문을 바꾸면 다시 확인해 주세요.');
+    },
+    'recognition-edit': () => {
+      setMode('add');
+      say('수정할 도구를 선택한 뒤 도면에서 편집하세요.');
+    },
     'review-apply': () => applyReview(),
     'review-close': () => { pendingReview = null; reviewBox.hidden = true; },
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
@@ -445,15 +536,23 @@ export function createPlanView(actions: AppActions): PlanView {
   scaleForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const m = Number(scaleMIn.value);
-    if (!(m > 0) || scaleLinePx <= 0) return;
+    if (!(m > 0) || scaleLinePx <= 0) {
+      scaleMIn.setCustomValidity('0보다 큰 실제 길이를 입력해 주세요.');
+      scaleMIn.reportValidity();
+      say('실제 길이를 0보다 큰 값으로 입력해 주세요.', 'error');
+      return;
+    }
+    scaleMIn.setCustomValidity('');
     pxPerMeter = scaleLinePx / m;
     scaleFixed = true;
     scaleSource = '직접 지정';
+    scaleStatus = 'confirmed';
     scaleForm.hidden = true;
     viewer?.setGuide(null);
     applyScale();
     say(`축척을 맞췄습니다. 1m = ${pxPerMeter.toFixed(1)} px`);
     setMode('view');
+    renderJourney();
   });
 
   /** 축척이 바뀌면 세계 크기가 바뀌므로 모델을 다시 놓는다 */
@@ -478,14 +577,17 @@ export function createPlanView(actions: AppActions): PlanView {
     undo.length = 0;
     undoBtn.disabled = true;
     if (!scaleFixed) pxPerMeter = autoWallPx / ASSUMED_WALL_M;
+    if (!scaleFixed) scaleStatus = 'assumed';
     if (userThick === null) thickIn.value = String(Math.min(40, wallPx));
     thickOut.value = String(wallPx);
     const v = await ensureViewer();
     v.setWalls(polygonsFromMask(mask, W(), H()));
     v.setModel(W(), H(), source, pxPerMeter);
+    v.topView();
     windowRects = [];
     doorRects = [];
     roomNames = {};
+    recognitionConfirmed = false;
     v.setWindows([]);
     v.setDoors([]);
     // 마스크가 바뀌었으니 지난 검토 제안과 방 목록은 버린다.
@@ -530,6 +632,9 @@ export function createPlanView(actions: AppActions): PlanView {
       userDark = null;
       scaleFixed = false;
       scaleSource = null;
+      scaleStatus = 'assumed';
+      sourceName = file.name;
+      sourceKind = file.name === 'default.png' ? 'sample' : 'upload';
       currentPlan = null;
       setMode('view');
       await show();
@@ -570,7 +675,7 @@ export function createPlanView(actions: AppActions): PlanView {
   async function payload(name: string) {
     if (!source || !mask) throw new Error('저장할 도면이 없습니다');
     const [image, maskBlob] = await Promise.all([toBlob(source, 'image/jpeg', 0.85), maskPng()]);
-    return { name, width: W(), height: H(), wallPx, pxPerMeter, scaleFixed, wallHeightM: Number(heightIn.value), image, mask: maskBlob };
+    return { name, width: W(), height: H(), wallPx, pxPerMeter, scaleFixed, scaleStatus, wallHeightM: Number(heightIn.value), image, mask: maskBlob };
   }
 
   async function save(mode: 'create' | 'update'): Promise<void> {
@@ -585,9 +690,11 @@ export function createPlanView(actions: AppActions): PlanView {
       saveForm.hidden = true;
       await refreshSaved();
       savedSel.value = detail.id;
+      retrySave = null;
       say(`"${detail.name}" 으로 저장했습니다.`);
     } catch (err) {
-      say(`저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      retrySave = mode;
+      offerRecovery(`저장하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, ['save-retry']);
     } finally {
       busy = false;
     }
@@ -648,7 +755,8 @@ export function createPlanView(actions: AppActions): PlanView {
       userThick = d.wallPx;
       pxPerMeter = d.pxPerMeter;
       scaleFixed = d.scaleFixed;
-      scaleSource = d.scaleFixed ? '저장본' : null;
+      scaleStatus = d.scaleStatus;
+      scaleSource = d.scaleStatus === 'confirmed' ? '저장된 입력값' : d.scaleStatus === 'auto' ? '저장된 자동 인식값' : d.scaleStatus === 'estimated' ? '저장된 표준 치수 어림' : null;
       heightIn.value = String(d.wallHeightM);
       heightOut.value = heightIn.value;
       thickIn.value = String(Math.min(40, wallPx));
@@ -656,12 +764,16 @@ export function createPlanView(actions: AppActions): PlanView {
       undo.length = 0;
       undoBtn.disabled = true;
       currentPlan = { id: d.id, name: d.name };
+      sourceName = d.name;
+      sourceKind = 'saved';
+      recognitionConfirmed = false;
       defaultTried = true;
       setMode('view');
       const v = await ensureViewer();
       v.setHeight(d.wallHeightM);
       v.setWalls(polygonsFromMask(mask, W(), H()));
       v.setModel(W(), H(), source, pxPerMeter);
+      v.topView();
       windowRects = [];
       doorRects = [];
       roomNames = {};
@@ -824,13 +936,14 @@ export function createPlanView(actions: AppActions): PlanView {
       if (!res.estimate && !res.guess) {
         // 자동 호출은 조용히 넘어가지만, 왜 못 읽었는지는 남겨야 원인을 찾을 수 있다
         console.warn('[plan] 치수 읽기: 쓸 만한 치수가 없음', res.note);
-        if (!opts.auto) say(`치수를 읽지 못했습니다. 축척 모드로 직접 맞춰 주세요. (${res.note})`, 'error');
+        if (!opts.auto) offerRecovery(`자동 치수 읽기를 완료하지 못했습니다. 직접 길이를 입력해 계속할 수 있습니다. (${res.note})`, ['scale-mode', 'scale-retry']);
         return;
       }
       // 보낸 그림 기준 축척을 마스크 기준으로 되돌린다
       if (res.estimate) {
         pxPerMeter = res.estimate.pxPerMeter / scale;
         scaleSource = `치수선 ${res.estimate.used}개`;
+        scaleStatus = 'auto';
         const labels = res.estimate.labels.slice(0, 4).join(', ');
         say(`치수선으로 축척을 맞췄습니다. 1m = ${pxPerMeter.toFixed(1)}px (치수 ${res.estimate.used}개가 서로 맞음: ${labels}).`);
       } else {
@@ -838,13 +951,23 @@ export function createPlanView(actions: AppActions): PlanView {
         const g = res.guess as NonNullable<typeof res.guess>;
         pxPerMeter = g.pxPerMeter / scale;
         scaleSource = `표준 치수 ${g.used}개 어림`;
+        scaleStatus = 'estimated';
         say(`치수선이 없어 표준 치수로 어림했습니다. 1m = ${pxPerMeter.toFixed(1)}px (${g.basis}). 어림이라 오차가 있습니다. 정확히 맞추려면 축척 모드를 쓰세요.`);
       }
       scaleFixed = true;
       applyScale();
     } catch (err) {
       console.warn('[plan] 치수 읽기 실패', err);
-      if (gen === planGen && !opts.auto) say(`치수를 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      if (gen !== planGen || opts.auto) return;
+      if (err instanceof ApiError && err.code === 'rate_limited') {
+        offerRecovery('자동 치수 읽기 이용 한도에 도달했습니다. 직접 길이를 입력해 계속할 수 있습니다.', ['scale-mode']);
+      } else if (err instanceof ApiError && err.code === 'budget_exhausted') {
+        offerRecovery('오늘 자동 치수 읽기에 쓸 수 있는 이용량이 모두 소진되었습니다. 직접 길이를 입력해 계속할 수 있습니다.', ['scale-mode']);
+      } else if (err instanceof ApiError && err.code === 'network') {
+        offerRecovery('자동 치수 읽기를 위해 서버에 연결하지 못했습니다. 연결을 확인한 뒤 다시 시도하거나 직접 길이를 입력하세요.', ['scale-retry', 'scale-mode']);
+      } else {
+        offerRecovery(`자동 치수 읽기를 완료하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, ['scale-retry', 'scale-mode']);
+      }
     } finally {
       busy = false;
       scaleBtn.disabled = mask === null;
@@ -980,6 +1103,7 @@ export function createPlanView(actions: AppActions): PlanView {
       pxPerMeter = rv.scale.pxPerMeter;
       scaleFixed = true;
       scaleSource = 'AI 어림';
+      scaleStatus = 'estimated';
       applyScale();
     } else if (maskChanged) {
       rebuild();
@@ -1038,9 +1162,15 @@ export function createPlanView(actions: AppActions): PlanView {
   floorIn.addEventListener('change', () => viewer?.setFloorVisible(floorIn.checked));
 
   const onKey = (e: KeyboardEvent): void => {
-    if (mode === 'view' || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
-    e.preventDefault();
-    popUndo();
+    if (mode === 'view') return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setMode('view');
+      say('편집을 끝냈습니다.');
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      popUndo();
+    }
   };
   document.addEventListener('keydown', onKey);
 

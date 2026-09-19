@@ -2,7 +2,7 @@
 
 저장소: https://github.com/quirinal36/fire_chatbot
 
-마일스톤 8개와 이슈 32개 등록 및 본문·라벨·마일스톤 연결 검증 완료. 담당자와 마감일은 미지정. 선행 작업은 실제 이슈 번호로 연결했다.
+마일스톤 8개와 이슈 39개 등록 및 본문·라벨·마일스톤 연결 검증 완료. 담당자와 마감일은 미지정. 선행 작업은 실제 이슈 번호로 연결했다.
 
 ## 마일스톤
 
@@ -53,3 +53,10 @@
 | ISS-030 | [#30 운영 배포·백업 복원·롤백 검증](https://github.com/quirinal36/fire_chatbot/issues/30) | M8 |
 | ISS-031 | [#31 사용자·관리자 안내 및 운영 인수인계 문서 작성](https://github.com/quirinal36/fire_chatbot/issues/31) | M8 |
 | ISS-032 | [#32 담당자 최종 검수 및 출시 결과 기록](https://github.com/quirinal36/fire_chatbot/issues/32) | M8 |
+| UX-001 | [#41 도면 툴바 줄바꿈과 편집 모드 전환 시 화면 이동 개선](https://github.com/quirinal36/fire_chatbot/issues/41) | M4 |
+| UX-002 | [#42 도면 축척의 출처와 확인 상태를 면적 옆에 표시](https://github.com/quirinal36/fire_chatbot/issues/42) | M5 |
+| UX-003 | [#43 도면 준비부터 검토까지 다음 행동 안내](https://github.com/quirinal36/fire_chatbot/issues/43) | M5 |
+| UX-004 | [#44 평면 중심의 도면 확인 화면과 편집 복구 제공](https://github.com/quirinal36/fire_chatbot/issues/44) | M5 |
+| UX-005 | [#45 영업장 조건 입력을 결과보다 먼저 제공](https://github.com/quirinal36/fire_chatbot/issues/45) | M5 |
+| UX-006 | [#46 도면 치수 읽기·검토·저장 실패 후 다음 행동 제공](https://github.com/quirinal36/fire_chatbot/issues/46) | M4 |
+| UX-007 | [#47 도면 UX 회귀 검증과 초보자 사용성 확인](https://github.com/quirinal36/fire_chatbot/issues/47) | M7 |

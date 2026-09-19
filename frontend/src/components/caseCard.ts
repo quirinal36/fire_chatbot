@@ -47,7 +47,7 @@ function input(def: FieldDef, v: FieldValue | undefined, needed: boolean): strin
             { value: 'false', label: '아니오' },
           ]
         : (def.options ?? []);
-    control = `<select id="${id}" name="${name}" data-kind="${def.kind}" data-initial="${esc(confirmed === null ? '' : String(confirmed))}">
+    control = `<select id="${id}" name="${name}" data-kind="${def.kind}" data-initial="${esc(confirmed === null ? '' : String(confirmed))}"${def.key === 'business_kind' ? ' autofocus' : ''}>
       <option value="">모름</option>
       ${options.map((o) => `<option value="${esc(o.value)}" ${String(confirmed) === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
     </select>`;
@@ -55,7 +55,7 @@ function input(def: FieldDef, v: FieldValue | undefined, needed: boolean): strin
     const type = def.kind === 'date' ? 'date' : 'number';
     const step = def.kind === 'integer' ? '1' : 'any';
     control = `<span class="case__input"><input id="${id}" name="${name}" type="${type}" step="${step}" data-kind="${def.kind}"
-      ${def.min !== undefined ? `min="${def.min}"` : ''} ${def.max !== undefined ? `max="${def.max}"` : ''}
+      ${def.min !== undefined ? `min="${def.min}"` : ''} ${def.max !== undefined ? `max="${def.max}"` : ''}${def.key === 'business_kind' ? ' autofocus' : ''}
       value="${esc(confirmed === null ? '' : String(confirmed))}" data-initial="${esc(confirmed === null ? '' : String(confirmed))}"
       placeholder="모름" />${def.unit ? `<span>${esc(def.unit)}</span>` : ''}</span>`;
   }
@@ -118,6 +118,9 @@ export function renderCaseCard(view: CaseView | undefined, defs: readonly FieldD
 
   const useClass = a.results.find((r) => r.ruleKey === 'use_class');
   const classNote = useClass ? `<p class="panel__note">분류: ${esc(useClass.explanation)}</p>` : '';
+  const missing = a.questions.length
+    ? `<p class="case__missing">먼저 아래 <strong>${a.questions.length}개 항목</strong>을 확인해 주세요. 모르면 ‘모름’으로 남겨도 됩니다.</p>`
+    : '<p class="case__missing">입력한 조건으로 판단할 수 있습니다. 값을 바꾸면 결과도 다시 계산합니다.</p>';
 
   const form = defs.length
     ? GROUPS.map(
@@ -134,9 +137,9 @@ export function renderCaseCard(view: CaseView | undefined, defs: readonly FieldD
   return `<div class="case">
     ${ruleNote}
     ${classNote}
-    ${results ? `<ul class="check-list">${results}</ul>` : ''}
     <form class="case__form" data-revision="${data.revision}">
       <p class="case__title">영업장 조건</p>
+      ${missing}
       ${form}
       ${view.message ? `<p class="panel__note" role="status">${esc(view.message)}</p>` : ''}
       <div class="case__actions">
@@ -144,6 +147,10 @@ export function renderCaseCard(view: CaseView | undefined, defs: readonly FieldD
       </div>
       <p class="panel__note">최종 판단은 관할 소방서 확인이 필요합니다. 입력한 값은 이 대화에만 저장됩니다.</p>
     </form>
+    <section class="case__results" aria-label="시설별 판단 결과">
+      <p class="case__title">시설별 결과</p>
+      ${results ? `<ul class="check-list">${results}</ul>` : '<p class="panel__note">판단 결과가 아직 없습니다.</p>'}
+    </section>
   </div>`;
 }
 
