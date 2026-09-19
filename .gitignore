@@ -19,3 +19,8 @@ backups/
 
 # 도면 진단 도구 출력
 tools/plan3d/out
+
+# AI Hub 도면 평가 데이터 (1.3GB, 재배포 불가)
+example_imgs/01.원천데이터
+example_imgs/02.라벨링데이터
+example_imgs/eval
