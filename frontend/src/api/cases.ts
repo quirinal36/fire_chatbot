@@ -41,7 +41,8 @@ export interface CaseData {
   };
 }
 
-export type FieldPatch = Record<string, { value: FieldPrimitive | null; state: 'user_confirmed' | 'unknown' }>;
+/** note 는 값의 출처다. 직접 고친 값은 null 을 보내 옛 출처를 지운다 */
+export type FieldPatch = Record<string, { value: FieldPrimitive | null; state: 'user_confirmed' | 'unknown'; note?: string | null }>;
 
 let fieldDefs: Promise<FieldDef[]> | null = null;
 

@@ -66,7 +66,7 @@ export async function createCase(db: SupabaseClient, ownerId: string, sessionId:
   return data as CaseRow;
 }
 
-export type FieldPatch = Readonly<Record<string, { value: unknown; state: 'user_confirmed' | 'unknown' }>>;
+export type FieldPatch = Readonly<Record<string, { value: unknown; state: 'user_confirmed' | 'unknown'; note?: string | null }>>;
 
 export function validatePatch(patch: FieldPatch): Record<string, FieldValue> {
   const out: Record<string, FieldValue> = {};
@@ -82,7 +82,7 @@ export function validatePatch(patch: FieldPatch): Record<string, FieldValue> {
     }
     const parsed = fieldValueSchema(key as FieldKey).safeParse(p.value);
     if (!parsed.success) bad.push(key);
-    else out[key] = { value: parsed.data, state: 'user_confirmed' };
+    else out[key] = { value: parsed.data, state: 'user_confirmed', note: p.note ?? null };
   }
   if (bad.length) throw new HttpError(400, 'invalid_request', `입력값을 확인해 주세요: ${bad.map((k) => (k in FIELDS ? FIELDS[k as FieldKey].label : k)).join(', ')}`);
   return out;

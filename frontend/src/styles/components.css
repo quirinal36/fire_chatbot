@@ -1679,3 +1679,53 @@
   gap: var(--space-2);
   cursor: pointer;
 }
+
+/* 도면 면적을 영업장 조건으로 가져오는 상자 */
+.plan3d__import-open {
+  margin: var(--space-2) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan3d__import {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.plan3d__import-title {
+  margin: 0;
+  font: var(--text-body-sm);
+  font-weight: 600;
+}
+
+.plan3d__import .plan3d__field--num select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--ink);
+  font: var(--text-body-sm);
+}
+
+.plan3d__import .plan3d__field--check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font: var(--text-micro);
+}
+
+.plan3d__import-actions {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

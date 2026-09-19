@@ -65,7 +65,10 @@ function input(def: FieldDef, v: FieldValue | undefined, needed: boolean): strin
     state === 'extracted'
       ? `<span class="case__hint">질문에서 “${esc(display(def, v))}”으로 읽었습니다${v?.note ? ` · ${esc(v.note)}` : ''}
           <button type="button" class="link" data-action="confirm-field" data-key="${esc(def.key)}">맞아요</button></span>`
-      : '';
+      : // 확인한 값에도 출처가 있으면 남긴다. 도면에서 가져온 값은 계산값임을 계속 알 수 있어야 한다
+        state === 'user_confirmed' && v?.note
+        ? `<span class="case__hint">${esc(v.note)}</span>`
+        : '';
 
   return `<div class="case__row${needed ? ' case__row--needed' : ''}">
     <label for="${id}">${esc(def.label)}${needed ? ' <span class="tag tag--flag">필요</span>' : ''}</label>
@@ -162,13 +165,14 @@ export function collectPatch(form: HTMLFormElement): FieldPatch {
     const raw = el.value.trim();
     if (raw === (el.dataset['initial'] ?? '')) continue;
     if (raw === '') {
-      patch[key] = { value: null, state: 'unknown' };
+      patch[key] = { value: null, state: 'unknown', note: null };
       continue;
     }
     const kind = el.dataset['kind'];
     const value = kind === 'number' || kind === 'integer' ? Number(raw) : kind === 'boolean' ? raw === 'true' : raw;
     if (typeof value === 'number' && !Number.isFinite(value)) continue;
-    patch[key] = { value, state: 'user_confirmed' };
+    // 직접 고친 값이므로 도면·질문에서 온 옛 출처는 지운다
+    patch[key] = { value, state: 'user_confirmed', note: null };
   }
   return patch;
 }

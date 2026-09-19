@@ -1,7 +1,7 @@
 /**
  * GET   /api/cases/:id — 조건과 규칙 판단 결과
  * PATCH /api/cases/:id — 조건 수정 (ISS-018)
- *   본문: { expectedRevision: number, fields: { [key]: { value, state: 'user_confirmed' | 'unknown' } } }
+ *   본문: { expectedRevision: number, fields: { [key]: { value, state: 'user_confirmed' | 'unknown', note?: 값의 출처 } } }
  *   revision 이 다르면 409 revision_conflict
  */
 import { NextResponse } from 'next/server';
@@ -30,7 +30,11 @@ const patchSchema = z.object({
   fields: z
     .record(
       z.string().max(60),
-      z.object({ value: z.union([z.number(), z.string().max(40), z.boolean(), z.null()]), state: z.enum(['user_confirmed', 'unknown']) }),
+      z.object({
+        value: z.union([z.number(), z.string().max(40), z.boolean(), z.null()]),
+        state: z.enum(['user_confirmed', 'unknown']),
+        note: z.string().max(200).nullish(),
+      }),
     )
     .refine((f) => Object.keys(f).length > 0 && Object.keys(f).length <= 30, '수정할 항목이 필요합니다'),
 });

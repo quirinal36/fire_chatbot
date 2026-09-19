@@ -9,6 +9,7 @@ import { ApiError } from '../api/client';
 import { cutOpening, DEFAULT_DARK, fillRect, labelComponents, nearestWall, paintWall, pointInPolygon, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
+import { decideImport, IMPORT_TARGETS, type AreaChoice } from '../plan/areaImport';
 import type { EditHandlers, Viewer } from '../plan/viewer';
 import type { AppActions } from '../actions';
 import type { AppState } from '../types';
@@ -265,6 +266,17 @@ export function createPlanView(actions: AppActions): PlanView {
   /** 벽·축척·판정이 바뀔 때마다 올라간다. 늦게 도착한 AI 제안이 바뀐 도면에 적용되는 것을 막는다 */
   let rev = 0;
   let recognitionConfirmed = false;
+  /** 면적 가져오기 상자를 열어 두었는가. 사용자가 열었을 때만 그린다 */
+  let importOpen = false;
+  /** 가져오기 상자에서 고른 면적·항목·확인 표시. 면적을 다시 잴 때마다 상자를 새로 그리므로 여기에 둔다 */
+  let importChoiceId = 'floor';
+  let importTargetKey: string = IMPORT_TARGETS[0].key;
+  let importAck = false;
+  /** 조건 카드가 열려 있고 저장할 수 있는가 */
+  let caseReady = false;
+  let caseSaving = false;
+  /** 조건에 보낸 값. 저장이 끝나면 실제로 들어갔는지 확인해 알린다 */
+  let importSent: { key: string; value: number } | null = null;
   /** 도면을 새로 올릴 때마다 올라간다. 늦게 도착한 AI 검토 결과를 버리는 데 쓴다 */
   let planGen = 0;
 
@@ -469,8 +481,102 @@ export function createPlanView(actions: AppActions): PlanView {
         ${scaleStatus === 'auto'
           ? '<button type="button" class="link" data-action="scale-confirm">읽은 치수 확인</button>'
           : `<button type="button" class="link" data-action="scale-mode">${esc(scale.action)}</button>`}</p>
-      ${report.rooms.length ? `<ol class="plan3d__rooms">${rows}</ol>` : '<p class="plan3d__sub">닫힌 구역을 찾지 못했습니다. 벽을 그어 방을 닫으면 면적이 나옵니다.</p>'}`;
+      ${report.rooms.length ? `<ol class="plan3d__rooms">${rows}</ol>` : '<p class="plan3d__sub">닫힌 구역을 찾지 못했습니다. 벽을 그어 방을 닫으면 면적이 나옵니다.</p>'}
+      ${renderImport(`${scale.label} · ${scale.detail}`)}`;
     renderJourney();
+  }
+
+  /** 조건으로 가져갈 수 있는 면적 목록. 전체 바닥 면적과 구역 하나하나 */
+  function areaChoices(): AreaChoice[] {
+    if (!report) return [];
+    return [
+      { id: 'floor', label: '전체 바닥 면적', areaM2: report.floorArea },
+      ...report.rooms.map((r) => ({ id: `room:${r.id}`, label: roomNames[r.id] ?? `구역 ${r.id}`, areaM2: r.area })),
+    ];
+  }
+
+  /**
+   * 면적을 영업장 조건으로 가져오는 상자. 값·출처·추정 여부·넣을 항목을 보여 주고 따로 확인을 받는다.
+   * 저절로 들어가면 계산값이 확인된 조건으로 둔갑하므로 누르기 전에는 아무것도 바꾸지 않는다.
+   */
+  function renderImport(origin: string): string {
+    if (!importOpen) {
+      return `<p class="plan3d__import-open"><button type="button" class="btn btn--quiet btn--compact" data-action="area-import-open">영업장 조건에 면적 넣기</button>
+        <span class="plan3d__sub">도면 면적은 확인 없이 조건에 반영되지 않습니다.</span></p>`;
+    }
+    const choices = areaChoices();
+    const choice = choices.find((c) => c.id === importChoiceId) ?? choices[0] ?? null;
+    if (choice) importChoiceId = choice.id;
+    const decision = decideImport(
+      { choice, targetKey: importTargetKey, scaleStatus, caseReady, acknowledged: importAck },
+      scaleSource,
+    );
+    const target = IMPORT_TARGETS.find((t) => t.key === importTargetKey) ?? IMPORT_TARGETS[0];
+    const blocked = decision.ok ? null : decision;
+    const fix =
+      blocked?.block === 'scale-unconfirmed'
+        ? ' <button type="button" class="link" data-action="scale-mode">실제 길이 맞추기</button>'
+        : blocked?.block === 'no-case'
+          ? ' <button type="button" class="link" data-action="open-case">조건 입력 시작하기</button>'
+          : '';
+    return `<form class="plan3d__import">
+      <p class="plan3d__import-title">영업장 조건에 면적 넣기</p>
+      <label class="plan3d__field plan3d__field--num">
+        <span>가져올 면적</span>
+        <select data-ctl="import-choice">
+          ${choices.map((c) => `<option value="${esc(c.id)}" ${c.id === importChoiceId ? 'selected' : ''}>${esc(c.label)} · ${esc(fmtArea(c.areaM2, scaleStatus !== 'confirmed'))}</option>`).join('')}
+        </select>
+      </label>
+      <label class="plan3d__field plan3d__field--num">
+        <span>넣을 조건 항목</span>
+        <select data-ctl="import-target">
+          ${IMPORT_TARGETS.map((t) => `<option value="${t.key}" ${t.key === importTargetKey ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+        </select>
+      </label>
+      <p class="plan3d__sub">넣을 값 <strong>${choice ? esc(fmtArea(choice.areaM2, scaleStatus !== 'confirmed')) : '-'}</strong> · 출처 ${esc(origin)}</p>
+      <p class="plan3d__sub">${esc(target.hint)} 건물 연면적처럼 건축물대장에서 확인하는 항목에는 도면 면적을 넣지 않습니다.</p>
+      <label class="plan3d__field plan3d__field--check">
+        <input type="checkbox" data-ctl="import-ack" ${importAck ? 'checked' : ''}>
+        <span>인식한 벽과 구역으로 계산한 값이며 실측·공식 면적이 아님을 확인했습니다.</span>
+      </label>
+      ${blocked ? `<p class="plan3d__sub tone-flag" role="status">${esc(blocked.message)}${fix}</p>` : ''}
+      <p class="plan3d__import-actions">
+        <button type="submit" class="btn btn--accent btn--compact" ${decision.ok && !caseSaving ? '' : 'disabled'}>${caseSaving ? '저장 중…' : '조건에 넣기'}</button>
+        <button type="button" class="btn btn--quiet btn--compact" data-action="area-import-close">닫기</button>
+      </p>
+    </form>`;
+  }
+
+  /** 가져오기 상자의 고른 값은 다시 그릴 때 살아 있어야 한다 */
+  areas.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLSelectElement) && !(t instanceof HTMLInputElement)) return;
+    const ctl = t.dataset['ctl'];
+    if (ctl === 'import-choice' && t instanceof HTMLSelectElement) importChoiceId = t.value;
+    else if (ctl === 'import-target' && t instanceof HTMLSelectElement) importTargetKey = t.value;
+    else if (ctl === 'import-ack' && t instanceof HTMLInputElement) importAck = t.checked;
+    else return;
+    renderAreas();
+  });
+
+  areas.addEventListener('submit', (e) => {
+    if (!(e.target instanceof HTMLFormElement) || !e.target.classList.contains('plan3d__import')) return;
+    e.preventDefault();
+    applyImport();
+  });
+
+  function applyImport(): void {
+    const choice = areaChoices().find((c) => c.id === importChoiceId) ?? null;
+    const decision = decideImport(
+      { choice, targetKey: importTargetKey, scaleStatus, caseReady, acknowledged: importAck },
+      scaleSource,
+    );
+    if (!decision.ok) { say(decision.message, 'error'); return; }
+    importSent = { key: decision.key, value: decision.value };
+    caseSaving = true;
+    actions.saveCaseFields({ [decision.key]: { value: decision.value, state: 'user_confirmed', note: decision.note } });
+    say(`${IMPORT_TARGETS.find((t) => t.key === decision.key)?.label}에 ${decision.value}㎡ 를 넣는 중…`);
+    renderAreas();
   }
 
   function snapshot(): Snapshot | null {
@@ -673,6 +779,9 @@ export function createPlanView(actions: AppActions): PlanView {
       viewer?.setHighlightedRoom(highlightedRoom);
       renderAreas();
     },
+    'area-import-open': () => { importOpen = true; renderAreas(); },
+    'area-import-close': () => { importOpen = false; renderAreas(); },
+    'open-case': () => actions.startCase(),
     'review-apply': () => applyReview(),
     'review-close': () => { pendingReview = null; reviewBox.hidden = true; },
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
@@ -1419,6 +1528,30 @@ export function createPlanView(actions: AppActions): PlanView {
       if (!defaultTried && !pixels) void loadDefault();
     },
     update(state) {
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      const view = conv?.caseId ? state.cases[conv.caseId] : undefined;
+      const ready = Boolean(view?.data);
+      const saving = view?.state === 'saving';
+      const done = caseSaving && !saving;
+      if (ready !== caseReady || saving !== caseSaving) {
+        caseReady = ready;
+        caseSaving = saving;
+        if (done && importSent) {
+          // 저장이 끝났다. 보낸 값이 실제로 들어갔을 때만 성공으로 말한다
+          const field = view?.data?.fields[importSent.key];
+          const applied = field?.state === 'user_confirmed' && field.value === importSent.value;
+          const label = IMPORT_TARGETS.find((t) => t.key === importSent?.key)?.label ?? '조건';
+          if (applied) {
+            importOpen = false;
+            importAck = false;
+            say(`${label}에 ${importSent.value}㎡ 를 넣었습니다. ‘내 영업장’ 탭에서 확인하세요.`);
+          } else {
+            say(view?.message ?? '조건에 넣지 못했습니다. 다시 시도해 주세요.', 'error');
+          }
+          importSent = null;
+        }
+        if (report) renderAreas();
+      }
       const next = state.user?.id ?? null;
       if (next === userId) return;
       userId = next;
