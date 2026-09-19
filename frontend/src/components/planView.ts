@@ -121,7 +121,7 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--compact" data-action="mode" data-mode="scale" aria-pressed="false">실제 길이 맞추기</button>
       </div>
       <div class="plan3d__modes">
-        <button type="button" class="btn btn--quiet btn--compact" data-action="finish-edit" hidden>편집 끝내기</button>
+        <button type="button" class="btn btn--quiet btn--compact is-invisible" data-action="finish-edit">편집 끝내기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="undo" disabled>되돌리기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="top">평면 보기</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="fit">3D 보기</button>
@@ -743,7 +743,8 @@ export function createPlanView(actions: AppActions): PlanView {
     help.hidden = next === 'view';
     editBox.hidden = next !== 'add';
     doorBox.hidden = next !== 'door';
-    finishEditBtn.hidden = next === 'view';
+    // 버튼을 아예 감추면 도구 줄이 다시 감겨 캔버스가 위아래로 움직인다. 자리는 지키고 보이지만 않게 한다
+    finishEditBtn.classList.toggle('is-invisible', next === 'view');
     if (next !== 'scale') { scaleForm.hidden = true; viewer?.setGuide(null); }
     viewer?.setEditing(next === 'view' ? null : editHandlers);
     if (wasView && next !== 'view') viewer?.topView();

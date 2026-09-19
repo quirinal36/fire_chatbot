@@ -1354,10 +1354,12 @@
 .plan3d__file-tools {
   display: flex;
   flex-wrap: wrap;
+  min-width: 0;
   gap: var(--space-2);
 }
 
-.plan3d__file-tools .btn {
+/* 버튼 글자는 어느 폭에서도 갈라지지 않는다. 자리가 모자라면 버튼 묶음이 다음 줄로 내려간다 */
+.plan3d .btn {
   white-space: nowrap;
 }
 
@@ -1366,8 +1368,17 @@
   cursor: pointer;
 }
 
+/* 파일 입력은 화면에서 감춰 두므로 초점 링이 라벨(버튼 모양)에 보여야 한다 */
+.plan3d__upload:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .plan3d__status {
   margin: 0;
+  /* 긴 오류 문구가 가로로 삐져나가 버튼을 밀어내지 않게 한다 */
+  min-width: 0;
+  overflow-wrap: anywhere;
   font: var(--text-body-sm);
   color: var(--ink-muted);
 }
@@ -1502,6 +1513,16 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--space-2);
+}
+
+/* 편집 도구와 보기 도구는 각각 한 묶음으로 움직인다. 좁으면 묶음째 다음 줄로 */
+.plan3d__modes {
+  min-width: 0;
+}
+
+/* 자리는 지키고 보이지만 않는다. 모드를 바꿔도 도구 줄 높이가 그대로라 캔버스가 움직이지 않는다 */
+.plan3d .is-invisible {
+  visibility: hidden;
 }
 
 .plan3d__context {
