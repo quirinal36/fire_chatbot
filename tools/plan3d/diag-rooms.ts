@@ -18,9 +18,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PNG } from 'pngjs';
 import jpeg from 'jpeg-js';
-import { wallMask, dilate, labelComponents, morphClose, fillRect } from '../../frontend/src/plan/walls';
-import { findOpenings } from '../../frontend/src/plan/openings';
-import { findRooms, outsideRegion } from '../../frontend/src/plan/rooms';
+import { wallMask, dilate, labelComponents, morphClose } from '../../frontend/src/plan/walls';
+import { findOpenings, type Opening } from '../../frontend/src/plan/openings';
+import { findRooms, outsideRegion, paintSegment } from '../../frontend/src/plan/rooms';
 
 const MAX_SIDE = 1600;
 const [, , file, ppmArg, outPrefix] = process.argv;
@@ -157,31 +157,48 @@ for (const doorM of [2.0, 2.6]) {
   console.log(`[전역 닫힘 ${doorM}m] 방 ${rr.rooms.length}개: ${fmt(rr.rooms.map((x) => x.area))}`);
 }
 
-// 실험 2: 후보 방식의 상한 — 검출된 개구부를 전부 문으로 보고 그 자리만 막는다 (전역 닫힘 없음)
+// 실험 2: 개구부 후보 (행·열 스캔 + 벽 끝점)
 const openings = findOpenings(mask, w, h, r.wallPx, ppm);
-console.log(`\nfindOpenings: ${openings.length}개, 폭(m): ${fmt(openings.map((o) => o.widthM))}`);
+const bySource = { gap: openings.filter((o) => o.source === 'gap').length, end: openings.filter((o) => o.source === 'end').length };
+console.log(`\nfindOpenings: ${openings.length}개 (행·열 스캔 ${bySource.gap}, 벽 끝점 ${bySource.end})`);
+for (const o of openings) console.log(`  #${o.id} ${o.source} ${o.axis} (${o.a[0].toFixed(0)},${o.a[1].toFixed(0)})→(${o.b[0].toFixed(0)},${o.b[1].toFixed(0)}) ${o.widthM.toFixed(2)}m`);
+// 후보 위치 그림: 벽=검정, 행·열 스캔 후보=파랑, 벽 끝점 후보=초록 (선분을 두께 3 으로)
 {
-  const temp = mask.slice();
-  for (const o of openings) fillRect(temp, w, h, o.rect, 1);
-  const wallBand = dilate(temp, w, h, 3);
+  const rgba = new Uint8Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) rgba.set(mask[i] ? [0, 0, 0, 255] : [255, 255, 255, 255], i * 4);
+  for (const o of openings) {
+    const line = new Uint8Array(w * h);
+    paintSegment(line, w, h, o.a, o.b, 3);
+    const c = o.source === 'gap' ? [30, 90, 220, 255] : [20, 160, 60, 255];
+    for (let i = 0; i < w * h; i++) if (line[i]) rgba.set(c, i * 4);
+  }
+  savePng(`${outPrefix}-openings.png`, w, h, rgba);
+}
+
+// 실험 3: 후보를 선분으로 막고 방을 나눈다 (전역 닫힘은 0.4m)
+function sealedRooms(label: string, picked: readonly Opening[], file: string): void {
+  const rr = findRooms(mask, w, h, ppm, { barriers: picked.map((o) => ({ a: o.a, b: o.b })) });
+  console.log(`[${label}] 방 ${rr.rooms.length}개: ${fmt(rr.rooms.map((x) => x.area))} (바닥 ${rr.floorArea.toFixed(1)}㎡)`);
+  // 그림: findRooms 와 같은 계산을 다시 해서 라벨을 얻는다
+  const sealed = mask.slice();
+  for (const o of picked) paintSegment(sealed, w, h, o.a, o.b, 3);
+  const kSmall = Math.max(3, Math.round(0.4 * ppm)) | 1;
+  const out2 = outsideRegion(sealed, w, h, kOutline >> 1);
+  const closed = morphClose(sealed, w, h, kSmall);
+  const band = dilate(sealed, w, h, 3);
   const free = new Uint8Array(w * h);
   const blocked = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
-    free[i] = !outside[i] && !wallBand[i] ? 1 : 0;
-    blocked[i] = !outside[i] && !mask[i] && wallBand[i] ? 1 : 0;
+    free[i] = !out2[i] && !closed[i] && !band[i] ? 1 : 0;
+    blocked[i] = !out2[i] && !mask[i] && (closed[i] || band[i]) ? 1 : 0;
   }
   const { labels, areas } = labelComponents(free, w, h);
-  const rooms: number[] = [];
-  for (let id = 1; id < areas.length; id++) if ((areas[id] ?? 0) >= minPx) rooms.push((areas[id] ?? 0) * m2);
-  rooms.sort((a, b) => b - a);
-  console.log(`[후보만 막기, 전역 닫힘 없음] 방 ${rooms.length}개: ${fmt(rooms)}`);
-  savePng(`${outPrefix}-cand.png`, w, h, render(w, h, mask, outside, blocked, labels, areas, minPx));
+  let insidePx = 0;
+  let blockedPx = 0;
+  for (let i = 0; i < w * h; i++) { if (!out2[i] && !mask[i]) insidePx++; if (blocked[i]) blockedPx++; }
+  console.log(`  미배정 ${((blockedPx / insidePx) * 100).toFixed(1)}% (${(blockedPx * m2).toFixed(1)}㎡)`);
+  savePng(file, w, h, render(w, h, mask, out2, blocked, labels, areas, minPx));
 }
-
-// 실험 3: 후보 막기 + 전역 닫힘 1.3m
-{
-  const temp = mask.slice();
-  for (const o of openings) fillRect(temp, w, h, o.rect, 1);
-  const rr = findRooms(temp, w, h, ppm);
-  console.log(`[후보 막기 + 전역 1.3m] 방 ${rr.rooms.length}개: ${fmt(rr.rooms.map((x) => x.area))}`);
-}
+sealedRooms('후보 전부 막기 (상한)', openings, `${outPrefix}-sealed-all.png`);
+sealedRooms('1.3m 이하 후보만 막기 (판정 전 기본값)', openings.filter((o) => o.widthM <= 1.3), `${outPrefix}-sealed-default.png`);
+sealedRooms('행·열 스캔 후보만 막기 (예전 후보)', openings.filter((o) => o.source === 'gap'), `${outPrefix}-sealed-gap.png`);

@@ -136,11 +136,22 @@ describe('치수선으로 축척 읽기', () => {
     expect(g?.basis).toContain('실내문 폭');
   });
 
-  it('하나를 잘못 봐도 중앙값이 버틴다', () => {
+  it('하나를 잘못 봐도 중앙값이 버티고, 잘못 본 것은 근거에서 뺀다', () => {
     // 침대를 가로(1.9m)로 재 놓고 세로(2.0m)라고 한 경우
     const g = plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57), obj('킹 침대 세로', 2.0, 40), obj('변기 길이', 0.7, 57), obj('욕조 길이', 1.7, 58)]), W, H);
     expect(g?.pxPerMeter).toBeCloseTo(57, 0);
-    expect(g?.spread).toBeGreaterThan(0.2);
+    expect(g?.used).toBe(3);
+    expect(g?.spread).toBeLessThan(0.05);
+    expect(g?.basis).not.toContain('킹 침대');
+  });
+
+  it('물건 하나뿐이거나 서로 안 맞으면 어림하지 않는다', () => {
+    // 하나만 있으면 확인할 길이 없다 — 호출마다 50·53·57 로 흔들린 값이다
+    expect(plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57)]), W, H)).toBeNull();
+    // 같은 물건을 두 번 잰 것은 하나로 친다
+    expect(plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57), obj('실내문 폭', 0.9, 58)]), W, H)).toBeNull();
+    // 둘이 30% 다르면 어느 쪽이 맞는지 모른다
+    expect(plausibleGuess(read([], 'mm', [obj('실내문 폭', 0.9, 57), obj('변기 길이', 0.7, 40)]), W, H)).toBeNull();
   });
 
   it('말이 안 되는 근거는 버린다', () => {

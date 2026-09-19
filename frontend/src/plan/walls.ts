@@ -195,6 +195,69 @@ export function morphClose(mask: Uint8Array, w: number, h: number, k: number): U
   return out;
 }
 
+/**
+ * 끊긴 벽 잇기. 가로·세로 한 방향씩만 닫아서, 같은 줄에서 k 보다 좁게 끊긴 자리만 메운다.
+ *
+ * 빗금 내벽은 속이 성기게 차서 열림을 거치면 점선처럼 토막 나기 쉽다. 그러면 방 나누기가 그 틈으로
+ * 새어 두 방이 하나가 된다. 2차원 닫힘은 모서리를 뭉개고 가까운 가구까지 붙이지만, 한 방향 닫힘은
+ * 벽이 이어지던 줄 위의 틈만 메운다. 원래 픽셀은 그대로 두고 더하기만 하므로 가장자리가 깎이지 않는다.
+ * 문·창은 벽 두께의 몇 배라 k 보다 넓어 메워지지 않는다.
+ */
+export function bridgeGaps(mask: Uint8Array, w: number, h: number, k: number): Uint8Array {
+  const hClosed = pass1d(pass1d(mask, w, h, k, false, true), w, h, k, true, true);
+  const vClosed = pass1d(pass1d(mask, w, h, k, false, false), w, h, k, true, false);
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) out[i] = mask[i] || hClosed[i] || vClosed[i] ? 1 : 0;
+  return out;
+}
+
+/**
+ * 빗금 내벽 보조 추출. 빗금과 그 테두리는 대개 연한 회색(밝기 160~220)이라 기본 이진화(160)에서
+ * 대부분 버려지고, 남은 진한 선 한두 줄만 열림을 거치며 점선처럼 토막 난다. 실제 아파트 도면에서
+ * 침실 사이 벽이 이렇게 사라져 침실 둘과 거실이 한 방이 됐다.
+ *
+ * 밝은 기준으로 다시 이진화해 빗금을 닫힘으로 메운 뒤, **얇고 긴 것만** 벽으로 받는다. 밝은 회색은
+ * 타일 격자·바닥 음영 같은 넓은 무늬에도 쓰이는데, 그것들은 닫힘 뒤 두꺼운 덩어리가 되므로
+ * 굵은 커널 열림으로 골라내 뺀다. 얇은 벽 표현이 따로 있는 도면(thin 이 있는 경우)에만 쓴다.
+ */
+export const LIGHT_DARK = 220;
+export function hatchedWalls(rgba: Uint8ClampedArray, w: number, h: number, coarse: number, thin: number, minArea: number): Uint8Array {
+  const light = binarize(rgba, w, h, LIGHT_DARK);
+  const solid = morphClose(light, w, h, hatchKernel(coarse));
+  const opened = openAt(solid, w, h, thin, minArea);
+  // 벽 두께의 2.5배보다 두꺼운 덩어리는 벽이 아니다 (타일·음영). 테두리까지 함께 뺀다
+  const blobs = dilate(morphOpen(opened, w, h, Math.max(3, Math.round(thin * 2.5)) | 1), w, h, 5);
+  const raw = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) raw[i] = opened[i] && !blobs[i] ? 1 : 0;
+  // 빗금 속이 고르게 차지 않아 토막 나 있다. 먼저 이어 붙인 뒤 길이를 본다
+  const out = bridgeGaps(raw, w, h, bridgeKernel(thin));
+  // 벽은 길다. 짧은 조각(치수선 눈금·기호)과 이미지 가장자리에 닿은 것(테두리 띠)은 벽이 아니다
+  const { labels, areas } = labelComponents(out, w, h);
+  const box = new Map<number, { x0: number; y0: number; x1: number; y1: number }>();
+  for (let i = 0; i < w * h; i++) {
+    const id = labels[i] ?? 0;
+    if (!id) continue;
+    const x = i % w;
+    const y = (i - x) / w;
+    const b = box.get(id);
+    if (b) { if (x < b.x0) b.x0 = x; if (y < b.y0) b.y0 = y; if (x >= b.x1) b.x1 = x + 1; if (y >= b.y1) b.y1 = y + 1; }
+    else box.set(id, { x0: x, y0: y, x1: x + 1, y1: y + 1 });
+  }
+  const minLen = thin * 6;
+  const drop = new Uint8Array(areas.length);
+  for (const [id, b] of box) {
+    const touches = b.x0 === 0 || b.y0 === 0 || b.x1 === w || b.y1 === h;
+    if (touches || Math.max(b.x1 - b.x0, b.y1 - b.y0) < minLen) drop[id] = 1;
+  }
+  for (let i = 0; i < w * h; i++) if (drop[labels[i] ?? 0]) out[i] = 0;
+  return out;
+}
+
+/** 끊긴 벽을 이을 때 쓰는 커널. 벽 두께의 3배까지, 31px 까지 */
+export function bridgeKernel(thin: number): number {
+  return Math.min(31, Math.max(5, Math.round(thin * 3))) | 1;
+}
+
 /** 4-연결 덩어리에 번호를 매긴다. 0 은 배경. 반환 areas[label] = 픽셀 수 */
 export function labelComponents(mask: Uint8Array, w: number, h: number): { labels: Int32Array; areas: number[] } {
   const labels = new Int32Array(w * h);
@@ -413,14 +476,22 @@ export function wallMask(
   if (opts.wallPx !== undefined) {
     // 사용자나 AI 가 두께를 지정하면 그 두께 하나로만 본다
     const t = Math.max(2, opts.wallPx);
-    return { mask: openAt(binary, w, h, t, t * t * 4), wallPx: t, thinPx: null };
+    const single = openAt(binary, w, h, t, t * t * 4);
+    return { mask: bridgeGaps(single, w, h, bridgeKernel(t)), wallPx: t, thinPx: null };
   }
   const coarse = estimateThickness(binary, w, h);
   const solid = morphClose(binary, w, h, hatchKernel(coarse));
   const { thick, thin } = estimateThicknessModes(solid, w, h);
   // 얇은 벽도 길이는 굵은 벽만큼 나온다. 그 정도 넓이가 안 되면 가구·글자로 본다
   const minArea = thin === null ? thick * thick * 4 : thin * thick * 2;
-  const mask = openAt(solid, w, h, thin ?? thick, minArea);
+  const opened = openAt(solid, w, h, thin ?? thick, minArea);
+  // 벽이 두 가지로 그려진 도면이면 연한 빗금 벽을 보조로 더한다
+  if (thin !== null) {
+    const hatched = hatchedWalls(rgba, w, h, coarse, thin, minArea);
+    for (let i = 0; i < w * h; i++) if (hatched[i]) opened[i] = 1;
+  }
+  // 열림을 거치며 토막 난 벽(성긴 빗금 내벽)을 같은 줄 위에서만 잇는다
+  const mask = bridgeGaps(opened, w, h, bridgeKernel(thin ?? thick));
   return { mask, wallPx: thick, thinPx: thin };
 }
 

@@ -3,10 +3,19 @@
  *
  *   1. 건물 윤곽: 이미지 밖의 빈 공간에서 벽을 뚫지 않고 다가갈 수 있는 곳이 바깥이다. 벽에서 1.5m
  *      이내로는 "먼 바깥"에서 1.5m 걸음 안에서만 들어올 수 있어, 3m 보다 좁은 창·문 틈은 못 지난다.
- *   2. 방: 윤곽 안에서 벽을 문 폭만큼(1.3m) 닫아 방 사이 출입구를 막은 뒤, 남은 빈 곳의 덩어리 하나가 방 하나다.
+ *   2. 방: 윤곽 안에서 방 사이 출입구를 막은 뒤, 남은 빈 곳의 덩어리 하나가 방 하나다.
+ *      막는 방법이 둘이다.
+ *        - 개구부 후보(openings.ts)를 `barriers` 로 주면 그 선분만 임시로 막고, 전역 닫힘은 벽의 잔 끊김을
+ *          메우는 정도(0.4m)로만 건다. 좁은 복도·욕실이 살아남고 모서리 문·넓은 개구부도 막힌다.
+ *        - 후보가 없으면 벽을 문 폭만큼(1.3m) 전역으로 닫는다. 1.3m 보다 좁은 공간이 통째로 사라지고
+ *          모서리 문은 못 막는 한계가 있다 (docs/plan-ai-roadmap.md 2절).
+ *      막는 선분은 방 계산에만 쓰고 벽 마스크에는 칠하지 않는다. 면적은 원래 마스크 기준으로 잰다.
  *   3. 면적 = 픽셀 수 ÷ (1m 당 픽셀 수)². 너무 작은 조각(1㎡ 미만)은 버린다.
+ *
+ * 벽이 하나도 없으면 인식 실패로 보고 빈 결과를 돌려준다. 그러지 않으면 바깥이 생기지 않아 이미지 전체가
+ * 방 하나가 되어, 추출 실패가 그럴듯한 면적으로 둔갑한다.
  */
-import { dilate, labelComponents, morphClose, polygonsFromMask, type WallPolygon } from './walls';
+import { dilate, labelComponents, morphClose, polygonsFromMask, type Pt, type WallPolygon } from './walls';
 
 export interface Room {
   readonly id: number;
@@ -25,9 +34,22 @@ export interface RoomReport {
   readonly rooms: Room[];
 }
 
+/** 방 계산에서만 임시로 막는 선분. 개구부 후보의 양 끝이다 */
+export interface Barrier {
+  readonly a: Pt;
+  readonly b: Pt;
+}
+
 export interface RoomOptions {
-  /** 이 폭(m)보다 좁은 틈은 문·창으로 보고 방 사이를 막는다 */
+  /**
+   * 이 폭(m)보다 좁은 틈은 전역 닫힘으로 막는다. barriers 가 있으면 0.4(벽의 잔 끊김만),
+   * 없으면 1.3(문 폭)이 기본이다
+   */
   readonly doorWidthM?: number;
+  /** 방 사이를 막을 선분(문·창으로 판정된 개구부 후보). 벽 마스크는 바꾸지 않는다 */
+  readonly barriers?: readonly Barrier[];
+  /** 막는 선분의 두께(px). 기본 3 */
+  readonly barrierPx?: number;
   /** 건물 윤곽을 찾을 때 메우는 최대 틈(m) */
   readonly outlineGapM?: number;
   /** 이보다 작은 방은 버린다(㎡) */
@@ -112,14 +134,47 @@ export function outsideRegion(mask: Uint8Array, w: number, h: number, r: number)
   return reached;
 }
 
+/** 선분 a~b 를 두께 thick 로 칠한다. 사선도 그대로 칠한다 (모서리 문은 사선이다) */
+export function paintSegment(mask: Uint8Array, w: number, h: number, a: Pt, b: Pt, thick: number): void {
+  const r = thick / 2;
+  const x0 = Math.max(0, Math.floor(Math.min(a[0], b[0]) - r));
+  const x1 = Math.min(w - 1, Math.ceil(Math.max(a[0], b[0]) + r));
+  const y0 = Math.max(0, Math.floor(Math.min(a[1], b[1]) - r));
+  const y1 = Math.min(h - 1, Math.ceil(Math.max(a[1], b[1]) + r));
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy || 1;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const px = x + 0.5 - a[0];
+      const py = y + 0.5 - a[1];
+      const t = Math.max(0, Math.min(1, (px * dx + py * dy) / len2));
+      const ex = px - t * dx;
+      const ey = py - t * dy;
+      if (ex * ex + ey * ey <= r * r) mask[y * w + x] = 1;
+    }
+  }
+}
+
+const EMPTY: RoomReport = { floorArea: 0, footprintArea: 0, rooms: [] };
+
 export function findRooms(mask: Uint8Array, w: number, h: number, pxPerMeter: number, opts: RoomOptions = {}): RoomReport {
+  if (!mask.some((v) => v === 1)) return EMPTY;
   const m2 = 1 / (pxPerMeter * pxPerMeter);
+  const barriers = opts.barriers ?? [];
   const kOutline = Math.max(3, Math.round((opts.outlineGapM ?? 3) * pxPerMeter)) | 1;
-  const kDoor = Math.max(3, Math.round((opts.doorWidthM ?? 1.3) * pxPerMeter)) | 1;
+  const kDoor = Math.max(3, Math.round((opts.doorWidthM ?? (barriers.length ? 0.4 : 1.3)) * pxPerMeter)) | 1;
   const minPx = (opts.minRoomM2 ?? 1) / m2;
 
+  // 0. 판정된 개구부를 임시로 막는다. 원래 마스크는 면적을 잴 때 그대로 쓴다
+  let sealed = mask;
+  if (barriers.length) {
+    sealed = mask.slice();
+    for (const s of barriers) paintSegment(sealed, w, h, s.a, s.b, opts.barrierPx ?? 3);
+  }
+
   // 1. 건물 윤곽
-  const outside = outsideRegion(mask, w, h, kOutline >> 1);
+  const outside = outsideRegion(sealed, w, h, kOutline >> 1);
   let footprintPx = 0;
   let floorPx = 0;
   for (let i = 0; i < w * h; i++) {
@@ -128,10 +183,10 @@ export function findRooms(mask: Uint8Array, w: number, h: number, pxPerMeter: nu
     if (!mask[i]) floorPx++;
   }
 
-  // 2. 방: 윤곽 안 & 벽 아님 & 문 폭으로 닫은 벽 아님
-  const doorClosed = morphClose(mask, w, h, kDoor);
+  // 2. 방: 윤곽 안 & 벽 아님 & 닫은 벽 아님
+  const doorClosed = morphClose(sealed, w, h, kDoor);
   // 벽 표면에 붙은 얇은 띠는 방에서 빼서 인접 방이 벽 한 겹으로 이어지는 걸 막는다
-  const wallBand = dilate(mask, w, h, 3);
+  const wallBand = dilate(sealed, w, h, 3);
   const free = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) free[i] = !outside[i] && !doorClosed[i] && !wallBand[i] ? 1 : 0;
   const { labels, areas } = labelComponents(free, w, h);

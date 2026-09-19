@@ -33,6 +33,8 @@ const OUTLIER = 0.12;
 const MIN_AGREE = 3;
 /** 구간이 둘뿐이면 중앙값에서 이 안에 들 때만 받아들인다 (둘이 4% 안으로 맞는다는 뜻) */
 const TIGHT = 0.02;
+/** 표준 치수 어림은 서로 다른 물건이 이만큼 서로 맞아야 쓴다 */
+const MIN_GUESS_ITEMS = 2;
 
 const clamp = (lo: number, hi: number) => z.coerce.number().transform((v) => Math.min(hi, Math.max(lo, v)));
 const pt = z.object({ x: clamp(0, 1), y: clamp(0, 1) });
@@ -268,10 +270,16 @@ export function estimateScale(read: ScaleRead, width: number, height: number): S
  */
 export function plausibleGuess(read: ScaleRead, width: number, height: number): ScaleGuess | null {
   const side = Math.max(width, height);
-  const vals = read.fallbacks
+  const all = read.fallbacks
     .map((f) => ({ v: f.px / f.meters, f }))
     .filter(({ v, f }) => f.meters > 0.1 && f.px > 2 && Number.isFinite(v) && v >= 4 && v <= side / 2);
-  if (!vals.length) return null;
+  if (!all.length) return null;
+  // 중앙값에서 멀리 벗어난 것(잘못 본 물건)은 버리고, 남은 것끼리 서로 맞아야 한다
+  const mid = median(all.map((x) => x.v));
+  const vals = all.filter((x) => Math.abs(x.v - mid) / mid <= OUTLIER);
+  // 서로 다른 물건 둘 이상이 맞아야 어림으로 친다. 하나뿐이면 확인할 길이 없어 호출마다 10% 넘게 흔들린다
+  const distinct = new Set(vals.map((x) => x.f.what.trim().toLowerCase()));
+  if (distinct.size < MIN_GUESS_ITEMS) return null;
   const pxPerMeter = median(vals.map((x) => x.v));
   const spread = Math.max(...vals.map((x) => Math.abs(x.v - pxPerMeter) / pxPerMeter));
   const basis = vals.map((x) => `${x.f.what} ${Math.round(x.f.px)}px ÷ ${x.f.meters}m`).join(', ').slice(0, 200);
@@ -342,7 +350,7 @@ export async function readScale(input: ScaleInput, fetchImpl?: typeof fetch): Pr
         ],
       },
     ],
-    { model, schema: { name: 'PlanScale', schema: SCALE_JSON_SCHEMA }, maxTokens: MAX_TOKENS, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
+    { model, schema: { name: 'PlanScale', schema: SCALE_JSON_SCHEMA }, maxTokens: MAX_TOKENS, retries: 0, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
   );
   let json: unknown;
   try {

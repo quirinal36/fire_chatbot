@@ -200,7 +200,7 @@ export async function reviewPlan(input: ReviewInput, fetchImpl?: typeof fetch): 
         ],
       },
     ],
-    { model, schema: { name: 'PlanReview', schema: REVIEW_JSON_SCHEMA }, maxTokens: MAX_TOKENS, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
+    { model, schema: { name: 'PlanReview', schema: REVIEW_JSON_SCHEMA }, maxTokens: MAX_TOKENS, retries: 0, timeoutMs: 60_000, ...(fetchImpl ? { fetchImpl } : {}) },
   );
   let json: unknown;
   try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt } from './walls';
+import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt, bridgeGaps, bridgeKernel } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -352,5 +352,30 @@ describe('가는 선이 많은 도면', () => {
     // 벽은 남는다
     expect(mask[150 * w + 32]).toBe(1);
     expect(mask[150 * w + 202]).toBe(1);
+  });
+});
+
+describe('bridgeGaps — 끊긴 벽 잇기', () => {
+  it('같은 줄에서 좁게 끊긴 벽은 잇고, 문 폭으로 끊긴 자리와 나란한 다른 벽은 건드리지 않는다', () => {
+    const w = 200;
+    const h = 100;
+    const T = 6;
+    const mask = new Uint8Array(w * h);
+    // 점선처럼 토막 난 세로 벽: 20px 벽, 8px 틈 반복
+    for (let y = 10; y < 90; y += 28) fillRect(mask, w, h, { x0: 50, y0: y, x1: 50 + T, y1: Math.min(90, y + 20) }, 1);
+    // 문(40px)으로 끊긴 가로 벽
+    fillRect(mask, w, h, { x0: 80, y0: 50, x1: 120, y1: 50 + T }, 1);
+    fillRect(mask, w, h, { x0: 160, y0: 50, x1: 190, y1: 50 + T }, 1);
+    // 세로 벽과 나란히 커널보다 멀리(30px) 떨어진 다른 벽 조각
+    fillRect(mask, w, h, { x0: 86, y0: 10, x1: 92, y1: 40 }, 1);
+    const out = bridgeGaps(mask, w, h, bridgeKernel(T));
+    // 토막 난 세로 벽이 이어졌다
+    for (let y = 10; y < 86; y++) expect(out[y * w + 52]).toBe(1);
+    // 문은 그대로 열려 있다
+    expect(out[52 * w + 140]).toBe(0);
+    // 커널보다 먼 나란한 벽 사이(가로 30px)는 메워지지 않는다
+    expect(out[20 * w + 70]).toBe(0);
+    // 원래 픽셀은 그대로다
+    for (let i = 0; i < w * h; i++) if (mask[i]) expect(out[i]).toBe(1);
   });
 });
