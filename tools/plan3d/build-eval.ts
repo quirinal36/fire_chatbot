@@ -12,15 +12,20 @@
  *   3. 정답에 축척 숫자가 없다. 벽 두께로 역산한다 (아래 SCALE_WALL_M).
  *
  * 축척 역산의 근거: APT_FP_STR_000477071 왼쪽 평면도는 치수선에 전체 폭 10,330mm 가 적혀 있고
- * 정답 벽체 bbox 폭이 1497px 이라 144.9px/m 이다. 그 도면의 벽 두께 중앙값이 37px 이므로 0.255m 다.
- * A3 300dpi 에 축척 1/80 이면 147.6px/m 이니 이론값과도 2% 안에서 맞는다.
+ * 정답 벽체 bbox 폭이 1497px 이라 144.9px/m 이다. 그 도면의 벽 두께 중앙값이 29px 이므로 0.20m 다
+ * (29 ÷ 0.20 = 145px/m, 치수선 실측과 0.1% 안에서 맞는다). A3 300dpi 에 축척 1/80 이면 147.6px/m 이니
+ * 이론값과도 2% 안이다.
+ *
+ * 두께는 **폴리곤 넓이 ÷ 긴 변**으로 잰다. bbox 짧은 변을 쓰면 안 된다 — 벽체 주석 하나가 ㄱ자·ㄷ자로
+ * 여러 벽을 아우르는 경우가 많아 bbox 가 실제 두께의 2~3배가 된다. 처음에 이것을 놓쳐 축척이
+ * 2~3배 크게 잡혔고, 그 탓에 우리 두께 추정이 실제보다 훨씬 나쁘게 보였다.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { PNG } from 'pngjs';
 
 /** 벽 두께 중앙값을 이 값으로 보고 축척을 역산한다 (m) */
-const SCALE_WALL_M = 0.25;
+const SCALE_WALL_M = 0.2;
 /**
  * 벽 주석이 없는 종류(SPA)는 공간 면적으로 축척을 역산한다. 한국 아파트의 표준적인 면적(㎡)이고,
  * 한 도면에서 여러 종류를 각각 계산해 중앙값을 쓴다 — 하나가 유별나도 결과가 끌려가지 않는다.
@@ -70,7 +75,7 @@ export interface EvalPlan {
   readonly height: number;
   /** 1m 당 픽셀. 벽 두께에서 역산한 값이라 어림이다 */
   readonly pxPerMeter: number;
-  /** 축척 역산에 쓴 벽 두께 중앙값 (내보낸 PNG 기준 px) */
+  /** 정답 벽 두께 중앙값 (내보낸 PNG 기준 px). 넓이 ÷ 긴 변으로 쟀다 */
   readonly wallPx: number;
   /** 정답. 종류마다 폴리곤 목록 */
   readonly truth: readonly { readonly name: string; readonly polygon: readonly Pt[]; readonly text?: string }[];
@@ -187,7 +192,13 @@ function buildSheet(root: string, kind: (typeof KINDS)[number], jsonPath: string
   groups.forEach((group, i) => {
     // 축척: 이 평면도 안의 벽 두께(짧은 변) 중앙값. 벽이 없는 종류(SPA·OCR·OBJ)는 시트 전체에서 찾는다
     const wallsHere = group.filter((a) => names.get(a.category_id) === '구조_벽체');
-    const thick = wallsHere.length >= 5 ? median(wallsHere.map((a) => Math.min(a.bbox[2] as number, a.bbox[3] as number))) : 0;
+    const thicks = wallsHere
+      .map((a) => {
+        const long = Math.max(a.bbox[2] as number, a.bbox[3] as number);
+        return long >= 5 ? polygonArea(toPolygon(a.segmentation[0] ?? [])) / long : 0;
+      })
+      .filter((t) => t > 0);
+    const thick = thicks.length >= 5 ? median(thicks) : 0;
     // 벽이 없으면 공간 면적으로 (종류마다 하나씩 구해 중앙값)
     const byArea: number[] = [];
     if (!thick) {

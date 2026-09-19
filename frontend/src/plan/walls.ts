@@ -37,6 +37,10 @@ const THIN_SHARE = 0.15;
  * 이것들이 "얇은 벽"으로 뽑히면 열림 커널이 3 으로 내려가 걸러 내는 일을 아예 안 하게 된다.
  */
 const MIN_THIN = 4;
+/** 두께가 안정되는 구간을 찾을 때 훑는 닫힘 커널 (홀수) */
+const CLOSE_STEPS = [3, 5, 7, 9, 11, 13, 15, 19, 23, 27, 31] as const;
+/** 이 비율 안에 들면 같은 구간으로 본다 */
+const PLATEAU_TOL = 1.25;
 
 export interface WallOptions {
   /** 이 값보다 어두운 픽셀을 선으로 본다 (0~255) */
@@ -136,6 +140,40 @@ export function estimateThicknessModes(mask: Uint8Array, w: number, h: number): 
  * 빗금(해치)으로 채운 벽을 속이 찬 띠로 만드는 닫힘 커널.
  * 빗금 간격은 벽 두께에 따라 커지므로 두께에 비례해 잡되, 너무 키우면 가구 선까지 메운다.
  */
+/**
+ * 닫힘 커널을 키우며 두께를 재서, 값이 안정되는 첫 구간을 벽 두께로 본다.
+ *
+ * 왜 이렇게까지 하나. 실시설계 도면은 **벽을 윤곽선 두 줄로만 그리고 속은 비우거나 해치로 채운다.**
+ * 그러면 검은 런은 어디서나 2~3px 이라 런 길이 투표가 벽 두께를 못 찾는다. AI Hub 도면 31장에서
+ * 기존 방식은 정답의 0.18배를 냈다 — 그 값으로 열림 커널을 만들면 걸러 내는 단계가 통째로 무력해져
+ * 가구·글자가 벽으로 남는다.
+ *
+ * 커널 k 로 닫으면 k 보다 좁은 틈이 메워진다. k 를 키우면 **해치 → 벽 속 → 방** 순으로 메워지므로,
+ * 두께 추정값 t(k) 는 계단처럼 올라가며 구간마다 평평해진다. 벽은 방보다 작은 구조이니
+ * **가장 이른 평평한 구간**이 벽 두께다. 가장 긴 구간을 고르면 방까지 메워진 값이 뽑힌다
+ * (실측에서 정답의 7배가 나온 도면이 있었다).
+ *
+ * k 가 t 보다 크면 이미 벽 너머를 메우는 중이므로 그런 k 는 보지 않는다.
+ */
+export function estimateThicknessStable(mask: Uint8Array, w: number, h: number): { thick: number; closeK: number } {
+  const ts = CLOSE_STEPS.map((k) => estimateThickness(morphClose(mask, w, h, k), w, h));
+  const usable = CLOSE_STEPS.map((k, i) => (k <= (ts[i] as number) * 1.2 && (ts[i] as number) >= MIN_THIN ? i : -1)).filter((i) => i >= 0);
+  for (let a = 0; a < usable.length; a++) {
+    let b = a;
+    while (b + 1 < usable.length && (usable[b + 1] as number) - (usable[b] as number) === 1) {
+      const vals = usable.slice(a, b + 2).map((i) => ts[i] as number);
+      if (Math.max(...vals) > Math.min(...vals) * PLATEAU_TOL) break;
+      b++;
+    }
+    if (b > a) {
+      const vals = usable.slice(a, b + 1).map((i) => ts[i] as number);
+      // 구간이 시작된 커널이 "벽 속을 막 채운" 크기다. 그보다 작게 닫으면 벽이 두 줄로 남는다
+      return { thick: Math.round((Math.min(...vals) + Math.max(...vals)) / 2), closeK: CLOSE_STEPS[usable[a] as number] as number };
+    }
+  }
+  return { thick: ts[0] ?? MIN_THIN, closeK: CLOSE_STEPS[0] as number };
+}
+
 export function hatchKernel(thick: number): number {
   return Math.min(9, Math.max(3, Math.round(thick * 0.25))) | 1;
 }
@@ -479,8 +517,11 @@ export function wallMask(
     const single = openAt(binary, w, h, t, t * t * 4);
     return { mask: bridgeGaps(single, w, h, bridgeKernel(t)), wallPx: t, thinPx: null };
   }
-  const coarse = estimateThickness(binary, w, h);
-  const solid = morphClose(binary, w, h, hatchKernel(coarse));
+  // 벽이 윤곽선으로만 그려진 도면에서는 런 길이 투표가 무력하다. 닫힘을 키우며 안정 구간을 찾는다.
+  // 그 구간이 시작된 커널로 닫아야 벽 속이 실제로 채워진다 — 해치 크기(hatchKernel)로는 모자라고,
+  // 채워지지 않은 채 두께에 맞춰 열면 윤곽선 두 줄이 통째로 지워진다.
+  const { thick: coarse, closeK } = estimateThicknessStable(binary, w, h);
+  const solid = morphClose(binary, w, h, Math.max(hatchKernel(coarse), closeK));
   const { thick, thin } = estimateThicknessModes(solid, w, h);
   // 얇은 벽도 길이는 굵은 벽만큼 나온다. 그 정도 넓이가 안 되면 가구·글자로 본다
   const minArea = thin === null ? thick * thick * 4 : thin * thick * 2;

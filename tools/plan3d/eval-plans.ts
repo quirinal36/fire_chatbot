@@ -56,8 +56,8 @@ interface EvalPlan {
   readonly truth: readonly Truth[];
 }
 
-/** 정답 축척으로 본 벽 두께(px). 우리 추정이 이것과 얼마나 다른지 함께 본다 */
-const truthWallPx = (plan: EvalPlan): number => plan.pxPerMeter * 0.25;
+/** 정답 벽 두께(px). 평가셋이 폴리곤 넓이 ÷ 긴 변으로 재 둔 값이다 */
+const truthWallPx = (plan: EvalPlan): number => plan.wallPx;
 
 /** 다각형 안을 채운다 (짝수-홀수 규칙) */
 function fillPolygon(mask: Uint8Array, w: number, h: number, poly: readonly Pt[], value = 1): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt, bridgeGaps, bridgeKernel } from './walls';
+import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt, bridgeGaps, bridgeKernel, estimateThicknessStable } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -377,5 +377,39 @@ describe('bridgeGaps — 끊긴 벽 잇기', () => {
     expect(out[20 * w + 70]).toBe(0);
     // 원래 픽셀은 그대로다
     for (let i = 0; i < w * h; i++) if (mask[i]) expect(out[i]).toBe(1);
+  });
+});
+
+describe('estimateThicknessStable — 윤곽선으로만 그린 벽', () => {
+  it('속이 빈 이중선 벽에서도 두께를 찾는다 (런 길이 투표는 못 찾는다)', () => {
+    const w = 300;
+    const h = 200;
+    const T = 16; // 벽 두께
+    const mask = new Uint8Array(w * h);
+    // 윤곽선 두 줄(2px)만 그린 벽. 속은 비어 있다
+    const hollow = (x0: number, y0: number, x1: number, y1: number): void => {
+      if (x1 - x0 > y1 - y0) {
+        fillRect(mask, w, h, { x0, y0, x1, y1: y0 + 2 }, 1);
+        fillRect(mask, w, h, { x0, y0: y1 - 2, x1, y1 }, 1);
+      } else {
+        fillRect(mask, w, h, { x0, y0, x1: x0 + 2, y1 }, 1);
+        fillRect(mask, w, h, { x0: x1 - 2, y0, x1, y1 }, 1);
+      }
+    };
+    hollow(20, 20, 280, 20 + T);
+    hollow(20, 180 - T, 280, 180);
+    hollow(20, 20, 20 + T, 180);
+    hollow(280 - T, 20, 280, 180);
+    hollow(150, 20, 150 + T, 180);
+    // 가구·치수선: 2px 가는 선을 잔뜩
+    for (let y = 40; y < 170; y += 7) fillRect(mask, w, h, { x0: 40, y0: y, x1: 130, y1: y + 2 }, 1);
+    const { thick, closeK } = estimateThicknessStable(mask, w, h);
+    // 런 길이 투표는 2px(가는 선)를 고른다
+    expect(estimateThickness(mask, w, h)).toBeLessThan(6);
+    // 안정 구간 방식은 벽 두께를 찾는다
+    expect(thick).toBeGreaterThanOrEqual(T - 4);
+    expect(thick).toBeLessThanOrEqual(T + 6);
+    // 벽 속을 채우려면 두께만 한 커널이 필요하다
+    expect(closeK).toBeGreaterThanOrEqual(T - 6);
   });
 });
