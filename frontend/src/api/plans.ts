@@ -75,41 +75,7 @@ export async function deletePlan(id: string): Promise<void> {
   await apiFetch(`/api/plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-/* ------------------------------ AI 검토 ------------------------------ */
-
-export interface ReviewContext {
-  readonly planId: string | null;
-  readonly round: number;
-  readonly grid: { readonly cols: number; readonly rows: number };
-  readonly params: { readonly dark: number; readonly wallPx: number; readonly pxPerMeter: number };
-  readonly openings: readonly { id: number; widthM: number; cell: string; between: readonly number[] }[];
-  readonly rooms: readonly { id: number; areaM2: number; cell: string }[];
-}
-
-export interface PlanReview {
-  readonly quality: number;
-  readonly summary: string;
-  readonly falseWalls: readonly { cell: string; what: string }[];
-  readonly missingWalls: readonly { from: { x: number; y: number }; to: { x: number; y: number }; why: string }[];
-  readonly openings: readonly { id: number; kind: 'door' | 'window' | 'open' | 'not_opening' }[];
-  readonly rooms: readonly { id: number; name: string }[];
-  readonly scale: { pxPerMeter: number | null; basis: string };
-  readonly params: { dark: number | null; wallPx: number | null };
-}
-
-export interface ReviewResponse {
-  readonly review: PlanReview;
-  readonly model: string;
-  readonly usage: { inputTokens: number; outputTokens: number; costUsd: number | null };
-  readonly latencyMs: number;
-}
-
-export function reviewPlan(image: Blob, width: number, height: number, context: ReviewContext): Promise<ReviewResponse> {
-  const form = new FormData();
-  form.set('meta', JSON.stringify({ context, width, height }));
-  form.set('image', image, 'overlay.jpg');
-  return apiJson<ReviewResponse>('/api/plans/review', { method: 'POST', body: form });
-}
+/* ------------------------------ 치수 읽기 ------------------------------ */
 
 export interface ScaleEstimate {
   /** 보낸 그림 기준 1m 당 픽셀 */

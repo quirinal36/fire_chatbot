@@ -21,13 +21,13 @@ describe('describeFailure', () => {
   });
 
   it('예산 소진은 한도와 구분해 알리고 다시 시도를 권하지 않는다', () => {
-    const f = describeFailure('review', of('budget_exhausted'), true);
+    const f = describeFailure('scale', of('budget_exhausted'), true);
     expect(f.message).toContain('소진');
-    expect(f.actions).not.toContain('review-retry');
+    expect(f.actions).not.toContain('scale-retry');
   });
 
   it('연결 실패에는 다시 시도를 준다', () => {
-    expect(describeFailure('review', of('network'), true).actions).toEqual(['review-retry', 'scale-mode']);
+    expect(describeFailure('scale', of('network'), true).actions).toEqual(['scale-retry', 'scale-mode']);
     expect(describeFailure('save', of('network'), true).actions).toEqual(['save-retry']);
   });
 

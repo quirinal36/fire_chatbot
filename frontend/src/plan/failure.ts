@@ -6,10 +6,10 @@
  */
 
 /** 실패할 수 있는 도면 작업 */
-export type PlanTask = 'scale' | 'review' | 'save';
+export type PlanTask = 'scale' | 'save';
 
 /** 안내 아래에 놓을 버튼. planView 의 data-action 과 같은 이름이다 */
-export type RecoveryAction = 'scale-mode' | 'scale-retry' | 'review-retry' | 'login' | 'save-retry';
+export type RecoveryAction = 'scale-mode' | 'scale-retry' | 'login' | 'save-retry';
 
 export interface Failure {
   readonly message: string;
@@ -18,15 +18,14 @@ export interface Failure {
 
 const TASK_LABEL: Record<PlanTask, string> = {
   scale: '자동 치수 읽기',
-  review: 'AI 도면 인식 검토',
   save: '도면 저장',
 };
 
 /** 이 작업을 다시 해 보는 버튼 */
-const RETRY: Record<PlanTask, RecoveryAction> = { scale: 'scale-retry', review: 'review-retry', save: 'save-retry' };
+const RETRY: Record<PlanTask, RecoveryAction> = { scale: 'scale-retry', save: 'save-retry' };
 
-/** 직접 길이를 입력하면 이어서 할 수 있는 작업인가. 축척이 없으면 검토도 의미가 없다 */
-const MANUAL_HELPS: Record<PlanTask, boolean> = { scale: true, review: true, save: false };
+/** 직접 길이를 입력하면 이어서 할 수 있는 작업인가 */
+const MANUAL_HELPS: Record<PlanTask, boolean> = { scale: true, save: false };
 
 function manual(task: PlanTask): RecoveryAction[] {
   return MANUAL_HELPS[task] ? ['scale-mode'] : [];

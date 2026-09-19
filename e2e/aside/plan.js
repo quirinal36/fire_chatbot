@@ -1,5 +1,5 @@
 /*
- * 도면 흐름: 도면 올리기 → 벽·방 구획 → (자동) 치수 읽기·AI 검토 → 제안 적용 → 되돌리기
+ * 도면 흐름: 도면 올리기 → 벽·방 구획 → (자동) 치수 읽기
  * 실행: cp example_imgs/ex01/before.jpg frontend/public/plans/_tmp-ex01.jpg && e2e/run-aside.sh plan [WEB_BASE]
  * 달러 기호와 백틱은 쓰지 않는다 (셸이 그대로 넘긴다). 120초 안에 끝나야 한다.
  */
@@ -45,43 +45,26 @@ const areas1 = await page.locator('.plan3d__areas').innerText();
 console.log('--- 판정 전 면적 ---\n' + areas1);
 await page.screenshot({ path: out + '/1-uploaded.png' });
 
-// 자동 치수 읽기 → 자동 검토. 검토 상자가 뜰 때까지 기다리며 상태 변화를 찍는다
+// 자동 치수 읽기를 기다린다 (AI 검토 단계는 없앴다)
 let last = '';
-const until = Date.now() + 105000;
-let arrived = false;
+const until = Date.now() + 95000;
+let done = false;
 while (Date.now() < until) {
   const st = await page.locator('.plan3d__status').innerText();
   if (st !== last) { mark('상태: ' + st); last = st; }
-  arrived = await page.evaluate(() => { const b = document.querySelector('.plan3d__review'); return !!(b && !b.hidden); });
-  if (arrived) break;
+  done = await page.evaluate(() => (document.querySelector('.plan3d__scale-state') || {}).textContent || '').then((t) => t.includes('자동 인식') || t.includes('표준 치수'));
+  if (done) break;
   await sleep(2000);
 }
-if (!arrived) {
-  console.log('--- 화면 로그 ---\n' + (await page.evaluate(() => window.__log.join('\n'))));
-  throw new Error('AI 검토 상자가 뜨지 않음');
-}
-mark('검토 도착: ' + (await page.locator('.plan3d__status').innerText()));
-const review = await page.locator('.plan3d__review').innerText();
-console.log('--- AI 검토 ---\n' + review);
-const areas2 = await page.locator('.plan3d__areas').innerText();
-console.log('--- 축척 읽기 후 면적 ---\n' + areas2);
-await page.screenshot({ path: out + '/2-review.png' });
+console.log('--- 치수 읽기 후 면적 ---\n' + (await page.locator('.plan3d__areas').innerText()));
+await page.screenshot({ path: out + '/2-scale.png' });
+if (!done) console.log('(자동 치수 읽기가 끝나지 않았다)');
 
-// 체크된 제안을 적용하고 면적을 다시 읽는다
-const applyBtn = page.locator('[data-action="review-apply"]');
-if ((await applyBtn.count()) && Date.now() - t0 < 100000) {
-  await applyBtn.click();
-  await sleep(1500);
-  mark('적용: ' + (await page.locator('.plan3d__status').innerText()));
-  console.log('--- 적용 후 면적 ---\n' + (await page.locator('.plan3d__areas').innerText()));
-  await page.screenshot({ path: out + '/3-applied.png' });
-  await page.locator('[data-action="undo"]').click();
-  await sleep(800);
-  console.log('--- 되돌리기 후 면적 ---\n' + (await page.locator('.plan3d__areas').innerText()));
-  console.log('되돌리기 버튼 disabled: ' + (await page.locator('[data-action="undo"]').evaluate((b) => b.disabled)));
-} else {
-  console.log('적용할 제안 없음');
-}
+// 벽 지우기·되돌리기가 되는지 본다
+await page.locator('[data-action="mode"][data-mode="erase"]').click();
+await sleep(300);
+console.log('되돌리기 버튼(편집 전) disabled: ' + (await page.locator('[data-action="undo"]').evaluate((b) => b.disabled)));
+
 console.log('--- 화면 로그 ---\n' + (await page.evaluate(() => window.__log.join('\n'))));
 console.log('--- 페이지 오류 ---\n' + errors.join('\n'));
 console.log(JSON.stringify({ session: pwd }));

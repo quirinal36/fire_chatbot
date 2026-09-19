@@ -4,8 +4,8 @@
  * 캔버스가 유지되어야 하므로 panel 은 이 요소를 innerHTML 로 다시 그리지 않고 붙였다 뗀다.
  */
 import { esc, must, onAction } from '../lib/dom';
-import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, reviewPlan, updatePlan, type PlanReview, type PlanSummary, type ReviewContext, type ScaleStatus } from '../api/plans';
-import { cutOpening, DEFAULT_DARK, fillRect, labelComponents, nearestWall, paintWall, pointInPolygon, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
+import { createPlan, deletePlan, getPlan, listPlans, readPlanScale, updatePlan, type PlanSummary, type ScaleStatus } from '../api/plans';
+import { cutOpening, fillRect, paintWall, polygonsFromMask, snapToAxis, wallMask, wallOutline, wallSegmentAt, type Pt, type Rect } from '../plan/walls';
 import { findRooms, type Barrier, type RoomReport } from '../plan/rooms';
 import { findOpenings, type Opening } from '../plan/openings';
 import { decideImport, IMPORT_TARGETS, type AreaChoice } from '../plan/areaImport';
@@ -22,32 +22,19 @@ const ASSUMED_WALL_M = 0.2;
 const DEFAULT_DOOR_M = 0.9;
 const UNDO_LIMIT = 20;
 const PYEONG = 3.3058;
-/** AI 검토에 보내는 그림의 최대 폭(px)과 격자 열 수 */
-const REVIEW_MAX_W = 1024;
 /** 축척 읽기용 그림 최대 폭. 치수 글자가 작아 검토용보다 크게 보낸다 */
 const SCALE_MAX_W = 1600;
-const REVIEW_COLS = 12;
-/** 판정 전에는 이 폭(m) 이하의 개구부 후보만 문으로 보고 방을 나눈다. 그보다 넓으면 AI·사용자 판정을 기다린다 */
+/**
+ * 이 폭(m) 이하의 개구부 후보를 문으로 보고 방을 나눈다. 그보다 넓은 자리(양여닫이, 트인 거실·주방)는
+ * 막지 않는다 — 트인 곳을 잘못 막는 것보다 한 구역으로 두는 편이 낫다. 나누고 싶으면 벽을 그으면 된다.
+ */
 const DEFAULT_SEAL_M = 1.3;
-/** AI 검토에 보내는 개구부 후보 최대 수 (서버 스키마와 같아야 한다) */
-const MAX_REVIEW_OPENINGS = 120;
-/** AI 가 제안한 빠진 벽은 원본에 어두운 선이 이 비율 이상 보여야 기본으로 고른다 */
-const MISSING_EVIDENCE = 0.6;
-
-/** 개구부 후보의 판정. 후보 번호는 마스크가 바뀌면 달라지므로 선분의 양 끝으로 기억한다 */
-type OpeningKind = 'door' | 'window' | 'open' | 'not_opening';
-interface OpeningJudgment {
-  readonly a: Pt;
-  readonly b: Pt;
-  readonly kind: OpeningKind;
-}
 /** 되돌리기 한 단계. 벽만 되돌리면 판정·축척과 어긋나므로 함께 담는다 */
 interface Snapshot {
   readonly mask: Uint8Array;
   readonly doorRects: Rect[];
   readonly windowRects: Rect[];
   readonly roomNames: Record<number, string>;
-  readonly judgments: OpeningJudgment[];
   readonly pxPerMeter: number;
   readonly scaleFixed: boolean;
   readonly scaleStatus: ScaleStatus;
@@ -88,7 +75,6 @@ export function createPlanView(actions: AppActions): PlanView {
         <button type="button" class="btn btn--quiet btn--compact" data-action="default">예시 도면</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="save-open" disabled>저장</button>
         <button type="button" class="btn btn--quiet btn--compact" data-action="scale-read" disabled>도면의 치수 자동 읽기</button>
-        <button type="button" class="btn btn--quiet btn--compact" data-action="review" disabled>도면 인식 검토</button>
       </div>
       <p class="plan3d__status" aria-live="polite">벽·출입구·창문만 있는 2D 도면(PNG·JPG)을 올리면 벽을 3D 로 세웁니다.</p>
       <div class="plan3d__recovery" role="group" aria-label="다음에 할 수 있는 일" hidden></div>
@@ -103,7 +89,6 @@ export function createPlanView(actions: AppActions): PlanView {
       <button type="submit" class="btn btn--accent btn--compact" data-save="create">새로 저장</button>
       <button type="button" class="btn btn--quiet btn--compact" data-action="save-close">닫기</button>
     </form>
-    <div class="plan3d__review" hidden></div>
     <div class="plan3d__saved" hidden>
       <label class="plan3d__field plan3d__field--num plan3d__field--grow">
         <span>내 도면</span>
@@ -199,9 +184,7 @@ export function createPlanView(actions: AppActions): PlanView {
   const undoBtn = must<HTMLButtonElement>('[data-action="undo"]', el);
   const finishEditBtn = must<HTMLButtonElement>('[data-action="finish-edit"]', el);
   const saveBtn = must<HTMLButtonElement>('[data-action="save-open"]', el);
-  const reviewBtn = must<HTMLButtonElement>('[data-action="review"]', el);
   const scaleBtn = must<HTMLButtonElement>('[data-action="scale-read"]', el);
-  const reviewBox = must<HTMLDivElement>('.plan3d__review', el);
   const saveForm = must<HTMLFormElement>('.plan3d__save', el);
   const nameIn = must<HTMLInputElement>('[data-ctl="name"]', el);
   const updateBtn = must<HTMLButtonElement>('[data-save="update"]', el);
@@ -260,13 +243,7 @@ export function createPlanView(actions: AppActions): PlanView {
   /** 구역 이름 (구역 번호 → 이름) */
   let roomNames: Record<number, string> = {};
   let lastOpenings: Opening[] = [];
-  /** 개구부 후보 판정 (AI 제안을 적용했거나 저장본에서 읽은 것) */
-  let judgments: OpeningJudgment[] = [];
-  let pendingReview: PlanReview | null = null;
-  /** 검토 결과가 도착했을 때의 후보 목록과 도면 상태. 적용할 때 같은 상태여야 한다 */
-  let pendingOpenings: Opening[] = [];
-  let pendingRev = -1;
-  /** 벽·축척·판정이 바뀔 때마다 올라간다. 늦게 도착한 AI 제안이 바뀐 도면에 적용되는 것을 막는다 */
+  /** 벽·축척이 바뀔 때마다 올라간다. 늦게 도착한 치수 읽기 결과를 버리는 데 쓴다 */
   let rev = 0;
   let recognitionConfirmed = false;
   /** 면적 가져오기 상자를 열어 두었는가. 사용자가 열었을 때만 그린다 */
@@ -301,7 +278,6 @@ export function createPlanView(actions: AppActions): PlanView {
   const RECOVERY_LABEL: Record<RecoveryAction, string> = {
     'scale-mode': '직접 길이 입력',
     'scale-retry': '다시 읽기',
-    'review-retry': '다시 검토',
     login: '로그인',
     'save-retry': '다시 저장',
   };
@@ -360,28 +336,9 @@ export function createPlanView(actions: AppActions): PlanView {
     roomsTimer = setTimeout(measureRooms, 250);
   }
 
-  /** 두 후보가 같은 자리인지. 양 끝이 벽 두께 안에서 맞으면 같은 개구부다 */
-  function sameOpening(a1: Pt, b1: Pt, a2: Pt, b2: Pt): boolean {
-    const tol = Math.max(6, wallPx * 1.5);
-    const near = (p: Pt, q: Pt): boolean => Math.hypot(p[0] - q[0], p[1] - q[1]) <= tol;
-    return (near(a1, a2) && near(b1, b2)) || (near(a1, b2) && near(b1, a2));
-  }
-  function judgedKind(o: Opening): OpeningKind | null {
-    return judgments.find((j) => sameOpening(j.a, j.b, o.a, o.b))?.kind ?? null;
-  }
-  function setJudgment(o: Opening, kind: OpeningKind): void {
-    judgments = judgments.filter((j) => !sameOpening(j.a, j.b, o.a, o.b));
-    judgments.push({ a: o.a, b: o.b, kind });
-    rev++;
-  }
-  /** 방 계산에서 막을 선분: 문·창으로 판정된 후보, 판정 전이면 문 폭 이하의 후보 */
+  /** 방 계산에서 막을 선분: 문 폭 이하의 개구부 후보 */
   function barriersOf(openings: readonly Opening[]): Barrier[] {
-    return openings
-      .filter((o) => {
-        const k = judgedKind(o);
-        return k === null ? o.widthM <= DEFAULT_SEAL_M : k === 'door' || k === 'window';
-      })
-      .map((o) => ({ a: o.a, b: o.b }));
+    return openings.filter((o) => o.widthM <= DEFAULT_SEAL_M).map((o) => ({ a: o.a, b: o.b }));
   }
 
   function measureRooms(): void {
@@ -392,72 +349,6 @@ export function createPlanView(actions: AppActions): PlanView {
     viewer.setRooms(report.rooms, roomNames);
     viewer.setHighlightedRoom(highlightedRoom);
     renderAreas();
-  }
-
-  /** 점이 어느 구역 안에 있는지. 구역 다각형의 바깥 테두리 안이고 구멍 밖이면 그 구역이다 */
-  function roomAt(p: Pt): number | null {
-    for (const room of report?.rooms ?? []) {
-      for (const poly of room.polygons) {
-        if (pointInPolygon(p, poly.outer) && !poly.holes.some((hole) => pointInPolygon(p, hole))) return room.id;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * 후보 양쪽의 구역 번호. 선분 가운데에서 직각 방향으로 벽 두께 두 배만큼 떨어진 두 점이 어느 구역인지 본다.
-   * AI 에 "구역 2↔3 사이" 로 알려 주면 문인지 트인 곳인지 판단이 쉬워진다. 같은 번호면 지금 나뉘지 않은 것이다.
-   */
-  function roomsBeside(o: Opening): number[] {
-    const mx = (o.a[0] + o.b[0]) / 2;
-    const my = (o.a[1] + o.b[1]) / 2;
-    const len = Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1]) || 1;
-    const nx = -(o.b[1] - o.a[1]) / len;
-    const ny = (o.b[0] - o.a[0]) / len;
-    const d = wallPx * 2 + 2;
-    const out: number[] = [];
-    for (const sign of [1, -1]) {
-      const id = roomAt([mx + nx * d * sign, my + ny * d * sign]);
-      if (id !== null) out.push(id);
-    }
-    return out;
-  }
-
-  /** AI 가 준 빠진 벽 양 끝을 기존 벽에 붙인다. 너무 짧으면 null */
-  function snapMissing(m: { from: { x: number; y: number }; to: { x: number; y: number } }, base: Uint8Array): [Pt, Pt] | null {
-    const reach = wallPx * 2;
-    const a = nearestWall(base, W(), H(), [m.from.x * W(), m.from.y * H()], reach);
-    const b = nearestWall(base, W(), H(), snapToAxis(a, [m.to.x * W(), m.to.y * H()]), reach);
-    return Math.hypot(b[0] - a[0], b[1] - a[1]) < 2 ? null : [a, b];
-  }
-
-  /**
-   * 선분을 따라 원본에 어두운 선이 있는 비율. 시각 모델은 없는 벽을 지어내기도 하므로(없는 대상 거부율이
-   * 거의 0 인 벤치마크가 있다) 원본 증거가 없는 제안은 기본으로 고르지 않는다. 선 근처 ±3px 를 본다.
-   */
-  function darkEvidence(a: Pt, b: Pt): number {
-    if (!pixels) return 0;
-    const dark = userDark ?? DEFAULT_DARK;
-    const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
-    const len = n || 1;
-    const nx = -(b[1] - a[1]) / len;
-    const ny = (b[0] - a[0]) / len;
-    let hit = 0;
-    for (let i = 0; i <= n; i++) {
-      const cx = a[0] + ((b[0] - a[0]) * i) / n;
-      const cy = a[1] + ((b[1] - a[1]) * i) / n;
-      let found = false;
-      for (let k = -3; k <= 3 && !found; k++) {
-        const x = Math.round(cx + nx * k);
-        const y = Math.round(cy + ny * k);
-        if (x < 0 || y < 0 || x >= W() || y >= H()) continue;
-        const p = (y * W() + x) * 4;
-        const lum = (299 * (pixels.data[p] ?? 255) + 587 * (pixels.data[p + 1] ?? 255) + 114 * (pixels.data[p + 2] ?? 255)) / 1000;
-        if (lum < dark) found = true;
-      }
-      if (found) hit++;
-    }
-    return hit / (n + 1);
   }
 
   function renderAreas(): void {
@@ -597,10 +488,10 @@ export function createPlanView(actions: AppActions): PlanView {
 
   function snapshot(): Snapshot | null {
     if (!mask) return null;
-    return { mask: mask.slice(), doorRects: [...doorRects], windowRects: [...windowRects], roomNames: { ...roomNames }, judgments: [...judgments], pxPerMeter, scaleFixed, scaleStatus, scaleSource };
+    return { mask: mask.slice(), doorRects: [...doorRects], windowRects: [...windowRects], roomNames: { ...roomNames }, pxPerMeter, scaleFixed, scaleStatus, scaleSource };
   }
 
-  /** 편집·판정·축척을 바꾸기 전에 부른다. 벽뿐 아니라 판정·축척도 함께 되돌린다 */
+  /** 편집·축척을 바꾸기 전에 부른다. 벽뿐 아니라 문·창·이름·축척도 함께 되돌린다 */
   function pushUndo(): void {
     const s = snapshot();
     if (!s) return;
@@ -619,7 +510,6 @@ export function createPlanView(actions: AppActions): PlanView {
     doorRects = prev.doorRects.filter((r) => !wallFills(prev.mask, r));
     windowRects = prev.windowRects;
     roomNames = prev.roomNames;
-    judgments = prev.judgments;
     const scaleChanged = prev.pxPerMeter !== pxPerMeter;
     pxPerMeter = prev.pxPerMeter;
     scaleFixed = prev.scaleFixed;
@@ -769,11 +659,9 @@ export function createPlanView(actions: AppActions): PlanView {
     },
     'save-close': () => { saveForm.hidden = true; },
     'load-saved': () => { if (savedSel.value) void openSaved(savedSel.value); },
-    review: () => void runReview(),
     'scale-read': () => void runScaleRead(),
     'scale-mode': () => setMode('scale'),
     'scale-retry': () => void runScaleRead(),
-    'review-retry': () => void runReview(),
     login: () => actions.openLogin(),
     'save-retry': () => { if (retrySave) void save(retrySave); },
     'scale-confirm': () => {
@@ -800,8 +688,6 @@ export function createPlanView(actions: AppActions): PlanView {
     'area-import-open': () => { importOpen = true; renderAreas(); },
     'area-import-close': () => { importOpen = false; renderAreas(); },
     'open-case': () => actions.startCase(),
-    'review-apply': () => applyReview(),
-    'review-close': () => { pendingReview = null; reviewBox.hidden = true; },
     'delete-saved': () => { if (savedSel.value) void removeSaved(savedSel.value); },
     top: () => viewer?.topView(),
     fit: () => viewer?.fitView(),
@@ -852,7 +738,6 @@ export function createPlanView(actions: AppActions): PlanView {
     if (userThick === null) autoWallPx = result.wallPx;
     undo.length = 0;
     undoBtn.disabled = true;
-    judgments = [];
     lastOpenings = [];
     rev++;
     if (!scaleFixed) pxPerMeter = autoWallPx / ASSUMED_WALL_M;
@@ -869,24 +754,20 @@ export function createPlanView(actions: AppActions): PlanView {
     recognitionConfirmed = false;
     v.setWindows([]);
     v.setDoors([]);
-    // 마스크가 바뀌었으니 지난 검토 제안과 방 목록은 버린다.
-    // report 를 비워 두면 뒤따르는 AI 검토가 새 방 목록을 즉시 계산한다
-    pendingReview = null;
-    reviewBox.hidden = true;
+    // 마스크가 바뀌었으니 지난 방 목록은 버린다
     report = null;
     highlightedRoom = null;
     ctl.hidden = false;
     tools.hidden = false;
     saveBtn.disabled = false;
-    reviewBtn.disabled = false;
     scaleBtn.disabled = false;
     scheduleRooms();
     const twoScale = thinPx === null ? '' : ` 벽이 두 가지로 그려져 있어 얇은 쪽(${thinPx}px)까지 잡았습니다.`;
     say(`벽을 세웠습니다.${twoScale} 끌어서 돌리고 휠로 확대합니다. 벽 추가·지우기·축척은 위 버튼으로 바꿉니다.`);
   }
 
-  /** autoReview 면 벽을 세운 뒤 AI 검토를 한 번 자동으로 돌린다 */
-  async function load(file: File, autoReview = false): Promise<void> {
+  /** autoScale 이면 벽을 세운 뒤 치수선을 한 번 자동으로 읽는다 */
+  async function load(file: File, autoScale = false): Promise<void> {
     if (!file.type.startsWith('image/')) {
       say('PNG·JPG·WebP 이미지만 올릴 수 있습니다.', 'error');
       return;
@@ -918,14 +799,9 @@ export function createPlanView(actions: AppActions): PlanView {
       currentPlan = null;
       setMode('view');
       await show();
-      // 도면을 먼저 화면에 띄우고, AI 는 그다음에 돌린다. 기다리며 빈 화면을 보여 주지 않는다.
-      // 축척을 먼저 맞춰야 검토가 맞는 면적·개구부 폭을 보고 판단한다
-      if (autoReview) {
-        void (async () => {
-          await runScaleRead({ auto: true });
-          if (gen === planGen) await runReview({ auto: true });
-        })();
-      }
+      // 도면을 먼저 화면에 띄우고 치수는 그다음에 읽는다. 기다리며 빈 화면을 보여 주지 않는다
+      if (autoScale) void runScaleRead({ auto: true });
+      void gen;
     } catch (err) {
       say(`도면을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
@@ -955,17 +831,16 @@ export function createPlanView(actions: AppActions): PlanView {
   async function payload(name: string) {
     if (!source || !mask) throw new Error('저장할 도면이 없습니다');
     const [image, maskBlob] = await Promise.all([toBlob(source, 'image/jpeg', 0.85), maskPng()]);
-    const annotations = JSON.stringify({ v: 1, judgments, doorRects, windowRects, roomNames });
+    const annotations = JSON.stringify({ v: 1, doorRects, windowRects, roomNames });
     return { name, width: W(), height: H(), wallPx, pxPerMeter, scaleFixed, scaleStatus, wallHeightM: Number(heightIn.value), annotations, image, mask: maskBlob };
   }
 
-  /** 저장본의 판정·문·창·이름. 형식이 어긋난 항목은 그 항목만 비운다 (구버전 저장본은 null) */
-  function readAnnotations(raw: unknown): { judgments: OpeningJudgment[]; doorRects: Rect[]; windowRects: Rect[]; roomNames: Record<number, string> } {
-    const out = { judgments: [] as OpeningJudgment[], doorRects: [] as Rect[], windowRects: [] as Rect[], roomNames: {} as Record<number, string> };
+  /** 저장본의 문·창·이름. 형식이 어긋난 항목은 그 항목만 비운다 (구버전 저장본은 null) */
+  function readAnnotations(raw: unknown): { doorRects: Rect[]; windowRects: Rect[]; roomNames: Record<number, string> } {
+    const out = { doorRects: [] as Rect[], windowRects: [] as Rect[], roomNames: {} as Record<number, string> };
     if (!raw || typeof raw !== 'object') return out;
     const o = raw as Record<string, unknown>;
     const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-    const pt = (v: unknown): Pt | null => (Array.isArray(v) && num(v[0]) && num(v[1]) ? [v[0], v[1]] : null);
     const rect = (v: unknown): Rect | null => {
       if (!v || typeof v !== 'object') return null;
       const r = v as Record<string, unknown>;
@@ -975,17 +850,6 @@ export function createPlanView(actions: AppActions): PlanView {
       const y1 = r['y1'];
       return num(x0) && num(y0) && num(x1) && num(y1) ? { x0, y0, x1, y1 } : null;
     };
-    const KINDS: readonly OpeningKind[] = ['door', 'window', 'open', 'not_opening'];
-    if (Array.isArray(o['judgments'])) {
-      for (const j of o['judgments'] as unknown[]) {
-        if (!j || typeof j !== 'object') continue;
-        const r = j as Record<string, unknown>;
-        const a = pt(r['a']);
-        const b = pt(r['b']);
-        const kind = KINDS.find((k) => k === r['kind']);
-        if (a && b && kind) out.judgments.push({ a, b, kind });
-      }
-    }
     for (const key of ['doorRects', 'windowRects'] as const) {
       if (!Array.isArray(o[key])) continue;
       for (const v of o[key] as unknown[]) {
@@ -1090,7 +954,6 @@ export function createPlanView(actions: AppActions): PlanView {
       undoBtn.disabled = true;
       rev++;
       const ann = readAnnotations(d.annotations);
-      judgments = ann.judgments;
       currentPlan = { id: d.id, name: d.name };
       sourceName = d.name;
       sourceKind = 'saved';
@@ -1111,7 +974,6 @@ export function createPlanView(actions: AppActions): PlanView {
       ctl.hidden = false;
       tools.hidden = false;
       saveBtn.disabled = false;
-      reviewBtn.disabled = false;
       scaleBtn.disabled = false;
       scheduleRooms();
       say(`"${d.name}" 을 불러왔습니다.`);
@@ -1144,106 +1006,6 @@ export function createPlanView(actions: AppActions): PlanView {
     const submitter = (e as SubmitEvent).submitter;
     void save(submitter instanceof HTMLButtonElement && submitter.dataset['save'] === 'update' ? 'update' : 'create');
   });
-
-  // ---- AI 검토 (Gemini, OpenRouter). 알고리즘 결과를 그림으로 보여 주고 고칠 곳을 받아, 수정은 여기서 한다
-  const colLetter = (c: number): string => String.fromCharCode(65 + c);
-  function gridOf(): { cols: number; rows: number; cw: number; ch: number } {
-    const cols = REVIEW_COLS;
-    const rows = Math.max(2, Math.round((cols * H()) / W()));
-    return { cols, rows, cw: W() / cols, ch: H() / rows };
-  }
-  function cellOf(p: Pt): string {
-    const g = gridOf();
-    const c = Math.min(g.cols - 1, Math.max(0, Math.floor(p[0] / g.cw)));
-    const r = Math.min(g.rows - 1, Math.max(0, Math.floor(p[1] / g.ch)));
-    return `${colLetter(c)}${r + 1}`;
-  }
-  function rectOfCell(cell: string): Rect | null {
-    const m = /^([A-Z])(\d{1,2})$/.exec(cell.trim().toUpperCase());
-    if (!m) return null;
-    const g = gridOf();
-    const c = (m[1] as string).charCodeAt(0) - 65;
-    const r = Number(m[2]) - 1;
-    if (c < 0 || c >= g.cols || r < 0 || r >= g.rows) return null;
-    return { x0: c * g.cw, y0: r * g.ch, x1: (c + 1) * g.cw, y1: (r + 1) * g.ch };
-  }
-
-  /** 원본 + 빨간 벽 + 격자 + 파란 개구부 번호 + 초록 구역 번호 */
-  function buildOverlay(openings: readonly Opening[]): { canvas: HTMLCanvasElement; scale: number } {
-    if (!source || !mask) throw new Error('도면이 없습니다');
-    const scale = Math.min(1, REVIEW_MAX_W / W());
-    const c = document.createElement('canvas');
-    c.width = Math.round(W() * scale);
-    c.height = Math.round(H() * scale);
-    const ctx = c.getContext('2d');
-    if (!ctx) throw new Error('캔버스를 만들 수 없습니다');
-    ctx.drawImage(source, 0, 0, c.width, c.height);
-    // 벽 마스크를 빨강 반투명으로
-    const layer = document.createElement('canvas');
-    layer.width = W();
-    layer.height = H();
-    const lctx = layer.getContext('2d');
-    if (!lctx) throw new Error('캔버스를 만들 수 없습니다');
-    const img = lctx.createImageData(W(), H());
-    for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
-      if (!mask[i]) continue;
-      img.data[p] = 220;
-      img.data[p + 1] = 30;
-      img.data[p + 2] = 30;
-      img.data[p + 3] = 150;
-    }
-    lctx.putImageData(img, 0, 0);
-    ctx.drawImage(layer, 0, 0, c.width, c.height);
-    // 격자
-    const g = gridOf();
-    ctx.strokeStyle = 'rgba(60,60,60,0.45)';
-    ctx.lineWidth = 1;
-    ctx.font = '600 11px system-ui, sans-serif';
-    ctx.textBaseline = 'top';
-    for (let col = 0; col < g.cols; col++) {
-      for (let row = 0; row < g.rows; row++) {
-        const x = col * g.cw * scale;
-        const y = row * g.ch * scale;
-        ctx.strokeRect(x, y, g.cw * scale, g.ch * scale);
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.fillRect(x + 1, y + 1, 22, 13);
-        ctx.fillStyle = '#333';
-        ctx.fillText(`${colLetter(col)}${row + 1}`, x + 3, y + 2);
-      }
-    }
-    // 개구부: 파랑
-    ctx.lineWidth = 2;
-    ctx.font = '700 13px system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    for (const o of openings) {
-      // 후보를 선분으로 그린다. 사각형이 아니라 선분이어야 사선(모서리 문)도 제 자리에 보인다
-      ctx.strokeStyle = '#1d5fd6';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(o.a[0] * scale, o.a[1] * scale);
-      ctx.lineTo(o.b[0] * scale, o.b[1] * scale);
-      ctx.stroke();
-      const cx = ((o.a[0] + o.b[0]) / 2) * scale + (o.axis === 'v' ? 14 : 0);
-      const cy = ((o.a[1] + o.b[1]) / 2) * scale + (o.axis === 'h' ? 14 : 0);
-      ctx.fillStyle = '#1d5fd6';
-      ctx.fillRect(cx - 10, cy - 8, 20, 16);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(String(o.id), cx, cy);
-    }
-    // 구역: 초록
-    for (const room of report?.rooms ?? []) {
-      const cx = room.center[0] * scale;
-      const cy = room.center[1] * scale;
-      ctx.fillStyle = '#1f8a4c';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 11, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillText(String(room.id), cx, cy);
-    }
-    return { canvas: c, scale };
-  }
 
   /**
    * 치수선을 읽어 축척을 정한다. 벽 두께 가정보다 훨씬 정확하고, 면적은 축척의 제곱으로 움직이므로
@@ -1299,193 +1061,19 @@ export function createPlanView(actions: AppActions): PlanView {
     }
   }
 
-  async function runReview(opts: { auto?: boolean } = {}): Promise<void> {
-    if (!mask || busy) return;
-    const gen = planGen;
-    const reqRev = rev;
-    busy = true;
-    reviewBtn.disabled = true;
-    try {
-      say(opts.auto ? '벽을 세웠습니다. 이어서 AI 가 검토하는 중… (수십 초)' : 'AI 가 벽 검출 결과를 검토하는 중… (수십 초)');
-      // 후보와 방 목록은 지금 마스크 기준이어야 한다. 디바운스 중이면 이전 도면 것일 수 있다
-      measureRooms();
-      const openings = lastOpenings.slice(0, MAX_REVIEW_OPENINGS);
-      const { canvas, scale } = buildOverlay(openings);
-      const g = gridOf();
-      const context: ReviewContext = {
-        planId: currentPlan?.id ?? null,
-        round: 1,
-        grid: { cols: g.cols, rows: g.rows },
-        params: { dark: userDark ?? DEFAULT_DARK, wallPx, pxPerMeter: pxPerMeter * scale },
-        openings: openings.map((o) => ({ id: o.id, widthM: o.widthM, cell: cellOf([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2]), between: roomsBeside(o) })),
-        rooms: (report?.rooms ?? []).map((r) => ({ id: r.id, areaM2: r.area, cell: cellOf(r.center) })),
-      };
-      const image = await toBlob(canvas, 'image/jpeg', 0.85);
-      const res = await reviewPlan(image, canvas.width, canvas.height, context);
-      if (gen !== planGen) return; // 검토하는 사이에 다른 도면을 올렸다
-      if (reqRev !== rev) {
-        // 검토하는 사이에 벽·축척·판정이 바뀌었다. 옛 상태에 대한 제안이므로 버린다
-        say('검토하는 사이에 도면이 바뀌어 AI 제안을 버렸습니다. 다시 검토해 주세요.');
-        return;
-      }
-      const rv = res.review;
-      // 보낸 그림 기준 축척을 마스크 기준으로 되돌린다
-      pendingReview = rv.scale.pxPerMeter !== null ? { ...rv, scale: { ...rv.scale, pxPerMeter: rv.scale.pxPerMeter / scale } } : rv;
-      pendingOpenings = openings;
-      pendingRev = rev;
-      renderReview(pendingReview, res.model);
-      say(`AI 검토가 끝났습니다 (품질 ${(rv.quality * 100).toFixed(0)}점). 적용할 제안을 골라 주세요.`);
-    } catch (err) {
-      console.warn('[plan] AI 검토 실패', err);
-      if (gen === planGen) offerRecovery(describeFailure('review', failureInput(err), signedIn));
-    } finally {
-      busy = false;
-      // 검토가 끝나면 다시 눌러 볼 수 있게 항상 되살린다
-      reviewBtn.disabled = mask === null;
-      scaleBtn.disabled = mask === null;
-    }
-  }
-
-  function renderReview(rv: PlanReview, model: string): void {
-    const items: string[] = [];
-    const item = (kind: string, idx: number, text: string, checked = true): string =>
-      `<li><label><input type="checkbox" data-kind="${kind}" data-idx="${idx}" ${checked ? 'checked' : ''}> ${esc(text)}</label></li>`;
-    rv.falseWalls.forEach((f, i) => items.push(item('false', i, `${f.cell} 칸에서 주 벽에 붙지 않은 조각 지우기 (${f.what})`)));
-    rv.missingWalls.forEach((m, i) => {
-      const seg = mask ? snapMissing(m, mask) : null;
-      const evidence = seg ? darkEvidence(seg[0], seg[1]) : 0;
-      const ok = evidence >= MISSING_EVIDENCE;
-      const len = seg ? (Math.hypot(seg[1][0] - seg[0][0], seg[1][1] - seg[0][1]) / pxPerMeter).toFixed(1) : '?';
-      items.push(item('missing', i, `벽 추가 ${len}m: ${m.why}${ok ? '' : ` — 원본에 선이 ${(evidence * 100).toFixed(0)}% 만 보여 확인이 필요합니다`}`, ok));
-    });
-    const KIND_TEXT: Record<OpeningKind, string> = {
-      door: '문 — 방을 나누고 3D 에 인방을 남김',
-      window: '창문 — 방을 나누고 창턱·유리를 세움',
-      open: '트인 곳 — 방을 나누지 않음',
-      not_opening: '개구부 아님 — 무시',
-    };
-    const byId = new Map(pendingOpenings.map((o) => [o.id, o]));
-    rv.openings.forEach((o, i) => {
-      const op = byId.get(o.id);
-      if (!op) return;
-      const changed = judgedKind(op) !== o.kind;
-      items.push(item('opening', i, `개구부 ${o.id} (${op.widthM.toFixed(1)}m): ${KIND_TEXT[o.kind]}${changed ? '' : ' (지금과 같음)'}`, changed));
-    });
-    rv.rooms.forEach((r, i) => items.push(item('name', i, `구역 ${r.id} 이름을 "${r.name}" 으로`)));
-    if (rv.scale.pxPerMeter !== null) items.push(item('scale', 0, `축척 1m = ${rv.scale.pxPerMeter.toFixed(1)}px 적용 (${rv.scale.basis})`, !scaleFixed));
-    if (rv.params.dark !== null || rv.params.wallPx !== null) {
-      const parts = [rv.params.dark !== null ? `어두움 기준 ${rv.params.dark}` : '', rv.params.wallPx !== null ? `벽 두께 ${rv.params.wallPx}px` : ''].filter(Boolean).join(', ');
-      items.push(item('params', 0, `권고 매개변수(${parts})로 벽을 다시 추출 — 지금까지의 편집과 판정이 지워집니다`, false));
-    }
-    reviewBox.innerHTML = `
-      <p class="plan3d__total">AI 검토 <strong>${(rv.quality * 100).toFixed(0)}점</strong>
-        <span class="plan3d__sub">· ${esc(model)}</span></p>
-      <p class="plan3d__sub">${esc(rv.summary)}</p>
-      ${items.length ? `<ul class="plan3d__suggest">${items.join('')}</ul>` : '<p class="plan3d__sub">고칠 제안이 없습니다.</p>'}
-      <div class="plan3d__modes">
-        ${items.length ? '<button type="button" class="btn btn--accent btn--compact" data-action="review-apply">선택한 제안 적용</button>' : ''}
-        <button type="button" class="btn btn--quiet btn--compact" data-action="review-close">닫기</button>
-      </div>`;
-    reviewBox.hidden = false;
-  }
-
-  function applyReview(): void {
-    const rv = pendingReview;
-    if (!rv || !mask || !viewer) return;
-    if (pendingRev !== rev) {
-      pendingReview = null;
-      reviewBox.hidden = true;
-      say('검토 뒤에 도면이 바뀌어 이 제안은 적용할 수 없습니다. 다시 검토해 주세요.', 'error');
-      return;
-    }
-    const picked = Array.from(reviewBox.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'));
-    const has = (kind: string, idx: number): boolean => picked.some((c) => c.dataset['kind'] === kind && Number(c.dataset['idx']) === idx);
-    if (!picked.length) {
-      pendingReview = null;
-      reviewBox.hidden = true;
-      return;
-    }
-    if (has('params', 0)) {
-      // 다시 추출하면 마스크·판정·되돌리기가 모두 새로 시작한다. 다른 제안은 새 마스크에 맞지 않으므로 함께 적용하지 않는다
-      if (rv.params.dark !== null) userDark = rv.params.dark;
-      if (rv.params.wallPx !== null) userThick = rv.params.wallPx;
-      pendingReview = null;
-      reviewBox.hidden = true;
-      void show();
-      return;
-    }
-    pushUndo();
-    const before = mask.slice();
-    let maskChanged = false;
-    if (rv.falseWalls.some((_, i) => has('false', i))) {
-      // 칸째 지우되 주 벽 네트워크(가장 큰 덩어리)는 남긴다. 가구·글자는 대개 따로 떨어진 덩어리다.
-      // 진짜 벽이 같은 칸에 있어도 지워지지 않고, 벽에 붙은 가구는 안 지워지는 쪽으로 틀린다 (사용자가 지우면 된다)
-      const { labels, areas } = labelComponents(before, W(), H());
-      let mainId = 0;
-      for (let id = 1; id < areas.length; id++) if ((areas[id] ?? 0) > (areas[mainId] ?? 0)) mainId = id;
-      rv.falseWalls.forEach((f, i) => {
-        if (!has('false', i) || !mask) return;
-        const r = rectOfCell(f.cell);
-        if (!r) return;
-        for (let y = Math.max(0, Math.floor(r.y0)); y < Math.min(H(), Math.ceil(r.y1)); y++) {
-          for (let x = Math.max(0, Math.floor(r.x0)); x < Math.min(W(), Math.ceil(r.x1)); x++) {
-            const i2 = y * W() + x;
-            if (mask[i2] && labels[i2] !== mainId) { mask[i2] = 0; maskChanged = true; }
-          }
-        }
-      });
-    }
-    rv.missingWalls.forEach((m, i) => {
-      if (!has('missing', i) || !mask) return;
-      const seg = snapMissing(m, before);
-      if (!seg) return;
-      paintWall(mask, W(), H(), seg[0], seg[1], wallPx);
-      maskChanged = true;
-    });
-    const sameRect = (r: Rect, q: Rect): boolean => r.x0 === q.x0 && r.y0 === q.y0 && r.x1 === q.x1 && r.y1 === q.y1;
-    const byId = new Map(pendingOpenings.map((o) => [o.id, o]));
-    rv.openings.forEach((o, i) => {
-      if (!has('opening', i)) return;
-      const op = byId.get(o.id);
-      if (!op) return;
-      setJudgment(op, o.kind);
-      windowRects = windowRects.filter((r) => !sameRect(r, op.rect));
-      doorRects = doorRects.filter((r) => !sameRect(r, op.rect));
-      if (o.kind === 'window') windowRects.push(op.rect);
-      if (o.kind === 'door') doorRects.push(op.rect);
-    });
-    viewer.setWindows(windowRects);
-    viewer.setDoors(doorRects);
-    rv.rooms.forEach((r, i) => { if (has('name', i)) roomNames[r.id] = r.name; });
-    if (rv.scale.pxPerMeter !== null && has('scale', 0)) {
-      pxPerMeter = rv.scale.pxPerMeter;
-      scaleFixed = true;
-      scaleSource = 'AI 어림';
-      scaleStatus = 'estimated';
-      applyScale();
-    } else if (maskChanged) {
-      rebuild();
-    } else {
-      measureRooms();
-    }
-    pendingReview = null;
-    reviewBox.hidden = true;
-    say('AI 제안을 적용했습니다. 되돌리기로 한 번에 취소할 수 있습니다.');
-  }
-
   let defaultTried = false;
   /**
-   * 기본 도면을 올린다. autoReview 는 사용자가 "기본 도면" 을 누른 경우에만 켠다.
-   * 탭을 열 때의 자동 적재까지 검토하면 페이지를 열 때마다 유료 호출과 하루 한도가 소모된다.
+   * 기본 도면을 올린다. autoScale 은 사용자가 "예시 도면" 을 누른 경우에만 켠다.
+   * 탭을 열 때의 자동 적재까지 치수를 읽으면 페이지를 열 때마다 유료 호출과 하루 한도가 소모된다.
    */
-  async function loadDefault(autoReview = false): Promise<void> {
+  async function loadDefault(autoScale = false): Promise<void> {
     defaultTried = true;
     say('기본 도면을 불러오는 중…');
     try {
       const res = await fetch(DEFAULT_PLAN_URL);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
-      await load(new File([blob], 'default.png', { type: blob.type || 'image/png' }), autoReview);
+      await load(new File([blob], 'default.png', { type: blob.type || 'image/png' }), autoScale);
     } catch (err) {
       say(`기본 도면을 불러오지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
