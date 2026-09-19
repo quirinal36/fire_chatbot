@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt, bridgeGaps, bridgeKernel, estimateThicknessStable } from './walls';
+import { DEFAULT_DARK, binarize, buildPolygons, cutOpening, gapAt, placeOpening, estimateThickness, estimateThicknessModes, fillRect, hatchKernel, morphClose, morphOpen, paintWall, signedArea, simplifyLoop, snapToAxis, traceLoops, wallMask, wallSegmentAt, bridgeGaps, bridgeKernel, estimateThicknessStable } from './walls';
 
 /** 흰 바탕 RGBA 캔버스와 검은 사각형 그리기 */
 function canvas(w: number, h: number): { rgba: Uint8ClampedArray; rect: (x: number, y: number, rw: number, rh: number, v?: number) => void } {
@@ -411,5 +411,64 @@ describe('estimateThicknessStable — 윤곽선으로만 그린 벽', () => {
     expect(thick).toBeLessThanOrEqual(T + 6);
     // 벽 속을 채우려면 두께만 한 커널이 필요하다
     expect(closeK).toBeGreaterThanOrEqual(T - 6);
+  });
+});
+
+/**
+ * 문·창은 실제 도면에서 벽이 없는 빈 자리다. 벽 위면 벽을 뚫고, 빈 자리면 벽 끝 사이를 잡는다.
+ */
+describe('placeOpening / gapAt', () => {
+  const w = 120;
+  const h = 80;
+  const T = 6;
+  /** 가로 벽이 x 40~60 에서 끊겨 있고, 아래쪽 x 30·70 에 세로 벽 두 개가 서 있다 */
+  const make = (): Uint8Array => {
+    const mask = new Uint8Array(w * h);
+    fillRect(mask, w, h, { x0: 10, y0: 20, x1: 40, y1: 20 + T }, 1);
+    fillRect(mask, w, h, { x0: 60, y0: 20, x1: 110, y1: 20 + T }, 1);
+    fillRect(mask, w, h, { x0: 30, y0: 40, x1: 30 + T, y1: 70 }, 1);
+    fillRect(mask, w, h, { x0: 70, y0: 40, x1: 70 + T, y1: 70 }, 1);
+    return mask;
+  };
+
+  it('gapAt: 벽 사이 틈을 [lo, hi) 로 돌려주고, 한쪽이 트여 있으면 null', () => {
+    expect(gapAt(make(), w, h, [50, 23], 'h', 60)).toEqual({ lo: 40, hi: 60 });
+    expect(gapAt(make(), w, h, [50, 23], 'v', 60)).toBeNull(); // 위로는 벽이 없다
+    expect(gapAt(make(), w, h, [50, 23], 'h', 5)).toBeNull(); // 너무 넓은 틈
+    expect(gapAt(make(), w, h, [50, 22], 'h', 60)).toEqual({ lo: 40, hi: 60 });
+  });
+
+  it('벽 위면 cutOpening 과 같은 결과에 onWall 이 붙는다', () => {
+    const placed = placeOpening(make(), w, h, [80, 23], null, T, 10, 60);
+    expect(placed).toEqual({ ...cutOpening(make(), w, h, [80, 23], null, T, 10), onWall: true });
+  });
+
+  it('벽 끝 사이 빈 틈을 클릭하면 틈 전체가 개구부가 되고 두께는 벽 두께다', () => {
+    const placed = placeOpening(make(), w, h, [50, 23], null, T, 10, 60);
+    expect(placed).toEqual({ rect: { x0: 40, y0: 20, x1: 60, y1: 26 }, axis: 'h', widthPx: 20, onWall: false });
+  });
+
+  it('가로·세로 모두 막혀 있으면 좁은 쪽 틈을 고른다', () => {
+    const mask = make();
+    fillRect(mask, w, h, { x0: 10, y0: 60, x1: 110, y1: 66 }, 1); // 아래 벽: 세로 틈 26~60 (34px)
+    const placed = placeOpening(mask, w, h, [50, 45], null, T, 10, 60); // 가로 틈 36~70 (34px), 같으면 가로
+    expect(placed?.axis).toBe('h');
+    expect(placed?.rect).toEqual({ x0: 36, y0: 42, x1: 70, y1: 48 });
+  });
+
+  it('빈 자리를 끌면 끈 방향 축으로 끈 만큼이 폭이고, 벽 가까운 끝은 벽에 붙는다', () => {
+    const placed = placeOpening(make(), w, h, [37, 50], [65, 53], T, 10, 60);
+    // 시작 37 은 세로 벽(30~36)에서 1px 떨어져 붙고, 끝 65 는 벽(70~)에서 5px 떨어져 붙는다
+    expect(placed).toEqual({ rect: { x0: 36, y0: 47, x1: 70, y1: 53 }, axis: 'h', widthPx: 34, onWall: false });
+  });
+
+  it('벽에서 먼 빈 자리를 끌면 끈 구간 그대로다', () => {
+    const placed = placeOpening(make(), w, h, [45, 10], [45, 4], T, 10, 60);
+    expect(placed?.rect).toEqual({ x0: 42, y0: 4, x1: 48, y1: 10 });
+    expect(placed?.axis).toBe('v');
+  });
+
+  it('막힌 틈이 없는 자리에서 클릭만 하면 null', () => {
+    expect(placeOpening(make(), w, h, [50, 10], null, T, 10, 60)).toBeNull();
   });
 });

@@ -714,3 +714,102 @@ export function cutOpening(
     widthPx: span,
   };
 }
+
+/** 개구부 후보로 볼 최대 폭(m). 양여닫이·넓은 창까지 담고, 방 한 변은 넘지 않는 값 */
+export const MAX_GAP_M = 2.6;
+
+/**
+ * (x, y) 에서 (dx, dy) 방향으로 벽을 만날 때까지 걸은 칸 수. maxSteps 안에 벽이 없거나 이미지 밖으로
+ * 나가면 -1. 시작 칸은 세지 않는다
+ */
+function stepsToWall(mask: Uint8Array, w: number, h: number, x: number, y: number, dx: number, dy: number, maxSteps: number): number {
+  for (let i = 1; i <= maxSteps; i++) {
+    const xx = x + dx * i;
+    const yy = y + dy * i;
+    if (xx < 0 || yy < 0 || xx >= w || yy >= h) return -1;
+    if (mask[yy * w + xx]) return i;
+  }
+  return -1;
+}
+
+/**
+ * 빈 점 p 에서 축을 따라 양쪽으로 벽을 만날 때까지의 틈 [lo, hi). 한쪽이라도 maxPx 안에 벽이 없으면
+ * null. 벽 끝과 벽 끝 사이에 놓인 문·창 자리를 찾는 데 쓴다 — 실제 도면에서 문은 벽이 없는 빈 자리다
+ */
+export function gapAt(mask: Uint8Array, w: number, h: number, p: Pt, axis: 'h' | 'v', maxPx: number): { lo: number; hi: number } | null {
+  const x = Math.floor(p[0]);
+  const y = Math.floor(p[1]);
+  if (x < 0 || y < 0 || x >= w || y >= h || mask[y * w + x]) return null;
+  const dx = axis === 'h' ? 1 : 0;
+  const dy = axis === 'h' ? 0 : 1;
+  const back = stepsToWall(mask, w, h, x, y, -dx, -dy, maxPx);
+  if (back < 0) return null;
+  const fwd = stepsToWall(mask, w, h, x, y, dx, dy, maxPx - back);
+  if (fwd < 0) return null;
+  const at = axis === 'h' ? x : y;
+  return { lo: at - back + 1, hi: at + fwd };
+}
+
+export interface PlacedOpening extends OpeningCut {
+  /** true 면 벽을 뚫은 자리다(마스크에서 비워야 한다). false 면 벽이 없는 빈 자리에 놓았다 */
+  readonly onWall: boolean;
+}
+
+/**
+ * 문·창 자리를 잡는다. 벽 위면 `cutOpening` 그대로(벽이 문·창으로 바뀐다). 벽이 없는 자리면
+ *   - 끌었을 때: 끈 방향의 축으로 끈 만큼이 폭, 두께는 wallPx. 양 끝이 wallPx 안에서 벽에 닿으면 벽에 붙인다.
+ *   - 클릭만 했을 때: 가로·세로로 벽 사이 틈을 재서 막힌 틈이 있는 축의 틈 전체를 잡는다. 둘 다 막혀
+ *     있으면 좁은 쪽이다(벽 끝 사이 문은 방의 다른 변보다 좁다). 막힌 틈이 없으면 null — 끌어서 그려야 한다.
+ */
+export function placeOpening(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  a: Pt,
+  b: Pt | null,
+  wallPx: number,
+  widthPx: number,
+  maxGapPx: number,
+): PlacedOpening | null {
+  const cut = cutOpening(mask, w, h, a, b, wallPx, widthPx);
+  if (cut) return { ...cut, onWall: true };
+  const half = Math.max(1, Math.round(wallPx / 2));
+  const build = (horizontal: boolean, s: number, e: number, cross: number): PlacedOpening => {
+    const c0 = Math.round(cross) - half;
+    const c1 = c0 + half * 2;
+    return {
+      rect: horizontal ? { x0: s, y0: c0, x1: e, y1: c1 } : { x0: c0, y0: s, x1: c1, y1: e },
+      axis: horizontal ? 'h' : 'v',
+      widthPx: e - s,
+      onWall: false,
+    };
+  };
+  const dragged = b === null ? 0 : Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (b !== null && dragged >= 2) {
+    const horizontal = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
+    const i = horizontal ? 0 : 1;
+    let s = Math.round(Math.min(a[i], b[i]));
+    let e = Math.round(Math.max(a[i], b[i]));
+    const cross = Math.floor(a[1 - i] as number);
+    // 양 끝이 벽 가까이면 벽에 붙인다
+    const dx = horizontal ? 1 : 0;
+    const dy = horizontal ? 0 : 1;
+    const sx = horizontal ? s : cross;
+    const sy = horizontal ? cross : s;
+    const ex = horizontal ? e - 1 : cross;
+    const ey = horizontal ? cross : e - 1;
+    const back = stepsToWall(mask, w, h, sx, sy, -dx, -dy, wallPx);
+    if (back > 0) s -= back - 1;
+    const fwd = stepsToWall(mask, w, h, ex, ey, dx, dy, wallPx);
+    if (fwd > 0) e += fwd - 1;
+    if (e - s < 2) return null;
+    return build(horizontal, s, e, a[1 - i] as number);
+  }
+  const gh = gapAt(mask, w, h, a, 'h', maxGapPx);
+  const gv = gapAt(mask, w, h, a, 'v', maxGapPx);
+  if (!gh && !gv) return null;
+  const useH = gh !== null && (gv === null || gh.hi - gh.lo <= gv.hi - gv.lo);
+  const g = (useH ? gh : gv) as { lo: number; hi: number };
+  if (g.hi - g.lo < 2) return null;
+  return build(useH, g.lo, g.hi, useH ? a[1] : a[0]);
+}

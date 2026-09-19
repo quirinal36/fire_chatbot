@@ -49,6 +49,16 @@ export interface Barrier {
   readonly b: Pt;
 }
 
+/**
+ * 문·창 사각형(픽셀)의 긴 축 중심선. 사용자가 놓은 문·창을 방 계산에서 막는 선분으로 쓴다.
+ * 양 끝이 사각형 끝이므로, 사각형이 벽에서 벽까지 닿아 있어야 방이 갈린다.
+ */
+export function barrierOfRect(r: { x0: number; y0: number; x1: number; y1: number }): Barrier {
+  const cx = (r.x0 + r.x1) / 2;
+  const cy = (r.y0 + r.y1) / 2;
+  return r.x1 - r.x0 >= r.y1 - r.y0 ? { a: [r.x0, cy], b: [r.x1, cy] } : { a: [cx, r.y0], b: [cx, r.y1] };
+}
+
 export interface RoomOptions {
   /**
    * 이 폭(m)보다 좁은 틈은 전역 닫힘으로 막는다. barriers 가 있으면 0.4(벽의 잔 끊김만),

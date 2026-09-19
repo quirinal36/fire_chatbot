@@ -21,16 +21,16 @@ export interface Viewer {
   setRooms(rooms: Room[], names?: Readonly<Record<number, string>>): void;
   /** 선택한 구역을 강조한다. null 이면 모두 같은 농도로 보인다 */
   setHighlightedRoom(id: number | null): void;
-  /** 창문 자리(픽셀 사각형). 아래엔 창턱, 위엔 유리를 세운다 */
+  /** 창문 자리(픽셀 사각형). 아래엔 창턱, 위엔 유리를 세우고, 바닥에는 파란 표식을 깐다 */
   setWindows(rects: readonly Rect[]): void;
-  /** 문 자리(픽셀 사각형). 문 높이 위로 인방을 남겨 문으로 보이게 한다 */
+  /** 문 자리(픽셀 사각형). 문 높이 위로 인방을 남기고, 바닥에는 문턱 표식을 깐다 */
   setDoors(rects: readonly Rect[]): void;
   setHeight(meters: number): void;
   setFloorVisible(visible: boolean): void;
   /** 보는 방식. 평면은 위에서 곧게 내려다보고 벽을 납작하게 눕혀 원본·치수·구역을 가리지 않는다 */
   setViewMode(mode: ViewMode): void;
   /** 드래그 중 미리보기 다각형(픽셀 좌표). null 이면 지운다 */
-  setGuide(polygon: Pt[] | null, tone?: 'add' | 'erase' | 'scale'): void;
+  setGuide(polygon: Pt[] | null, tone?: GuideTone): void;
   /** 편집 핸들러를 걸면 왼쪽 드래그가 편집이 되고, null 이면 보는 방식에 맞는 조작으로 돌아간다 */
   setEditing(handlers: EditHandlers | null): void;
   /** 지금 보는 방식 그대로 도면 전체가 들어오게 카메라만 다시 맞춘다 */
@@ -39,6 +39,15 @@ export interface Viewer {
 }
 
 export type ViewMode = 'plan' | '3d';
+/** 미리보기 색. 문·창은 놓인 뒤의 표식과 같은 색이라 끌면서 결과를 미리 본다 */
+export type GuideTone = 'add' | 'erase' | 'scale' | 'door' | 'window';
+
+/** 문 표식 색. 벽(회갈색)·구역(선명한 색)과 구별되는 나무색 */
+const DOOR_COLOR = 0x8a5a2b;
+/** 창 표식·유리 색. 투명한 파란색 */
+const WINDOW_COLOR = 0x8fc1e3;
+/** 바닥 표식 높이(m). 구역 색(0.01)보다 살짝 위에 두어 겹쳐도 보인다 */
+const MARK_Y = 0.015;
 
 /** 평면에서 벽을 눕히는 두께(m). 0 이면 바닥과 겹쳐 깜빡이므로 아주 얕게 남긴다 */
 const PLAN_SLAB_M = 0.02;
@@ -77,18 +86,25 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     add: new T.MeshStandardMaterial({ color: 0xb5532f, transparent: true, opacity: 0.55 }),
     erase: new T.MeshStandardMaterial({ color: 0xc0392b, transparent: true, opacity: 0.4 }),
     scale: new T.MeshStandardMaterial({ color: 0x2f6fb5, transparent: true, opacity: 0.8 }),
+    door: new T.MeshBasicMaterial({ color: DOOR_COLOR, transparent: true, opacity: 0.6, depthWrite: false, side: T.DoubleSide }),
+    window: new T.MeshBasicMaterial({ color: WINDOW_COLOR, transparent: true, opacity: 0.6, depthWrite: false, side: T.DoubleSide }),
   };
   const walls = new T.Group();
   const rooms = new T.Group();
   const windows = new T.Group();
   const doors = new T.Group();
+  /** 바닥에 까는 문·창 표식. 평면에서는 문틀·창틀이 안 보이므로 이것이 문·창을 알려 준다 */
+  const doorMarks = new T.Group();
+  const windowMarks = new T.Group();
   const sillMat = wallMat;
-  const paneMat = new T.MeshStandardMaterial({ color: 0x8fc1e3, transparent: true, opacity: 0.35, roughness: 0.2, side: T.DoubleSide });
+  const paneMat = new T.MeshStandardMaterial({ color: WINDOW_COLOR, transparent: true, opacity: 0.35, roughness: 0.2, side: T.DoubleSide });
+  const doorMarkMat = new T.MeshBasicMaterial({ color: DOOR_COLOR, transparent: true, opacity: 0.7, depthWrite: false, side: T.DoubleSide });
+  const windowMarkMat = new T.MeshBasicMaterial({ color: WINDOW_COLOR, transparent: true, opacity: 0.55, depthWrite: false, side: T.DoubleSide });
   const floor = new T.Mesh(new T.PlaneGeometry(1, 1), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   let guide: THREE.Mesh | null = null;
-  scene.add(walls, rooms, windows, doors, floor);
+  scene.add(walls, rooms, windows, doors, doorMarks, windowMarks, floor);
 
   let polygons: WallPolygon[] = [];
   let roomList: Room[] = [];
@@ -143,8 +159,20 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     return toShape({ outer: poly, holes: [] });
   };
 
+  /** 문·창 자리에 납작한 표식을 깐다. 눕힌 면의 법선이 아래를 향하므로 양면 재질이라야 위에서 보인다 */
+  function buildMarks(group: THREE.Group, rects: readonly Rect[], mat: THREE.Material): void {
+    disposeGroup(group);
+    for (const r of rects) {
+      const geo = new T.ShapeGeometry(rectShape(r));
+      geo.rotateX(Math.PI / 2);
+      geo.translate(0, MARK_Y, 0);
+      group.add(new T.Mesh(geo, mat));
+    }
+  }
+
   /** 문 위에 남는 벽(인방). 이게 있어야 벽이 그냥 끊긴 자리와 구별된다 */
   function buildDoors(): void {
+    buildMarks(doorMarks, doorRects, doorMarkMat);
     disposeGroup(doors);
     const doorH = Math.min(DOOR_M, height * 0.9);
     const lintelH = height - doorH;
@@ -160,6 +188,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   }
 
   function buildWindows(): void {
+    buildMarks(windowMarks, windowRects, windowMarkMat);
     disposeGroup(windows);
     for (const r of windowRects) {
       const shape = rectShape(r);
@@ -227,6 +256,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   /**
    * 보는 방식을 장면에 반영한다. 평면에서는 벽을 바닥에 눕히고(높이만 눌러 형상은 그대로다)
    * 문틀·창틀처럼 세로로 서 있는 것은 감춘다. 위에서 보면 가리기만 하고 알려 주는 게 없다.
+   * 바닥의 문·창 표식은 어느 방식에서도 남긴다 — 평면에서는 문·창의 유일한 표시이고, 입체에서는 문턱이다.
    */
   function applyViewMode(): void {
     const plan = viewMode === 'plan';
@@ -419,10 +449,14 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     setGuide(polygon, tone = 'add') {
       if (guide) { guide.geometry.dispose(); scene.remove(guide); guide = null; }
       if (!polygon || polygon.length < 3) return;
+      const flat = tone === 'door' || tone === 'window';
       const depth = tone === 'add' ? height * 1.01 : tone === 'erase' ? height * 1.05 : 0.05;
-      const geo = new T.ExtrudeGeometry(toShape({ outer: polygon, holes: [] }), { depth, bevelEnabled: false });
+      // 문·창 미리보기는 표식과 같은 납작한 면이다. 표식보다 살짝 위에 두어 놓인 것과 겹쳐도 보인다
+      const geo = flat
+        ? new T.ShapeGeometry(toShape({ outer: polygon, holes: [] }))
+        : new T.ExtrudeGeometry(toShape({ outer: polygon, holes: [] }), { depth, bevelEnabled: false });
       geo.rotateX(Math.PI / 2);
-      geo.translate(0, depth, 0);
+      geo.translate(0, flat ? MARK_Y * 2 : depth, 0);
       guide = new T.Mesh(geo, guideMats[tone]);
       scene.add(guide);
     },
@@ -446,6 +480,8 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       disposeGroup(rooms);
       disposeGroup(windows);
       disposeGroup(doors);
+      disposeGroup(doorMarks);
+      disposeGroup(windowMarks);
       guide?.geometry.dispose();
       floor.geometry.dispose();
       floorMat.map?.dispose();
