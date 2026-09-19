@@ -1,0 +1,16 @@
+{
+  "name": "plan3d-tools",
+  "private": true,
+  "description": "도면 인식 진단·평가 스크립트 (앱 코드가 아니다. frontend/src/plan 을 Node 에서 그대로 부른다)",
+  "type": "module",
+  "scripts": {
+    "diag": "tsx diag-rooms.ts"
+  },
+  "devDependencies": {
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

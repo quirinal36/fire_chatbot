@@ -16,3 +16,6 @@ e2e/out
 
 # 백업 사본 (사용자 데이터 포함)
 backups/
+
+# 도면 진단 도구 출력
+tools/plan3d/out

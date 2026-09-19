@@ -68,7 +68,7 @@ function wallDistance(mask: Uint8Array, w: number, h: number): Int32Array {
  * r 걸음까지 다가간 곳까지가 바깥이다. 폭이 2r 보다 좁은 창·문 틈으로는 거의 들어오지 못한다.
  * 가장자리 픽셀은 이미지 밖의 먼 바깥에서 (r - 벽까지 거리)만큼 걸어온 것으로 쳐서 남은 걸음을 준다.
  */
-function outsideRegion(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+export function outsideRegion(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   const dist = wallDistance(mask, w, h);
   const reached = new Uint8Array(w * h);
   const buckets: number[][] = Array.from({ length: r + 1 }, () => []);
