@@ -72,7 +72,7 @@ export function importNote(choice: AreaChoice, scaleSource: string | null): stri
  */
 export function decideImport(req: ImportRequest, scaleSource: string | null): ImportDecision {
   if (!req.caseReady) {
-    return { ok: false, block: 'no-case', message: '‘내 영업장’ 탭에서 조건 입력을 먼저 시작해 주세요.' };
+    return { ok: false, block: 'no-case', message: '‘내 영업장’ 탭에서 조건 입력을 먼저 시작한 뒤 도면 탭으로 돌아와 다시 열어 주세요.' };
   }
   if (req.scaleStatus !== 'confirmed') {
     return {

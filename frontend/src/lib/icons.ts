@@ -66,6 +66,21 @@ export const icons = {
       '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path>',
       size,
     ),
+  /* 도면 탭 HUD — 평면·입체·전체 맞추기·원본·저장 */
+  plan: (size = 16): string =>
+    stroke('<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 13h8V3M11 13v8M21 9h-6"></path>', size),
+
+  cube: (size = 16): string =>
+    stroke('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path>', size),
+
+  fit: (size = 16): string =>
+    stroke('<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"></path>', size),
+
+  image: (size = 16): string =>
+    stroke('<rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="M21 16l-5-5-8 8"></path>', size),
+
+  save: (size = 16): string =>
+    stroke('<path d="M5 3h11l3 3v15H5z"></path><path d="M8 3v5h7V3M8 21v-6h8v6"></path>', size),
 } as const;
 
 /** 구글 로고 — 브랜드 고정색이라 currentColor 를 쓰지 않습니다. */

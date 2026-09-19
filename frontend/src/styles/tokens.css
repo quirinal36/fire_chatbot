@@ -9,6 +9,8 @@
   --surface-base: #faf9f5;
   --surface-raised: #ffffff;
   --surface-sunken: #f0eee6;
+  /* 도면 위에 띄우는 도구 띠. 도면이 비쳐 보이되 글자는 읽혀야 한다 */
+  --surface-hud: rgba(255, 255, 255, 0.92);
 
   /* 선 */
   --border-subtle: #e5e2d9;
@@ -81,6 +83,7 @@
     --surface-base: #1b1a17;
     --surface-raised: #24231f;
     --surface-sunken: #2c2a25;
+    --surface-hud: rgba(36, 35, 31, 0.9);
     --border-subtle: #37352e;
     --border-strong: #45423a;
     --ink: #f3f0e8;
@@ -99,6 +102,7 @@
   --surface-base: #1b1a17;
   --surface-raised: #24231f;
   --surface-sunken: #2c2a25;
+  --surface-hud: rgba(36, 35, 31, 0.9);
   --border-subtle: #37352e;
   --border-strong: #45423a;
   --ink: #f3f0e8;

@@ -104,11 +104,6 @@
   border-left: 0;
 }
 
-/* 넓히면 도면도 커져야 한다. 폭만 늘고 높이가 그대로면 작업 공간이 넓어진 느낌이 없다 */
-.app.is-panel-expanded .plan3d__stage {
-  min-height: 60vh;
-}
-
 @media (max-width: 1080px) {
   .app.is-panel-expanded .panel {
     position: static;

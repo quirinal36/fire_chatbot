@@ -16,6 +16,7 @@ const base = '__BASE__';
 const errors = [];
 const t0 = Date.now();
 const mark = (s) => console.log('[' + Math.round((Date.now() - t0) / 1000) + 's] ' + s);
+const goStep = async (n) => { await page.locator('.plan3d__step[data-step="' + n + '"]').click(); await sleep(200); };
 
 await openTab(base);
 await page.waitForSelector('.app[data-ready="true"]', { timeout: 20000 });
@@ -41,7 +42,11 @@ await fs.writeFile('ex01.jpg', Buffer.from(await r.arrayBuffer()));
 await page.locator('.plan3d input[type="file"]').setInputFiles('ex01.jpg');
 await waitUntil(() => { const a = document.querySelector('.plan3d__areas'); return a && !a.hidden && a.textContent.includes('바닥 면적'); }, 30000, '방 면적');
 mark('벽 세움: ' + (await page.locator('.plan3d__status').innerText()));
-const areas1 = await page.locator('.plan3d__areas').innerText();
+// 바닥 띠에는 합계만 있다. 구역 목록은 서랍을 열어 읽는다
+await page.locator('[data-action="drawer"][data-drawer="rooms"]').click();
+await sleep(300);
+const areas1 = (await page.locator('.plan3d__areas').innerText()) + '\n' + (await page.locator('.plan3d__drawer-body').innerText());
+await page.locator('[data-action="drawer-close"]').click();
 console.log('--- 판정 전 면적 ---\n' + areas1);
 await page.screenshot({ path: out + '/1-uploaded.png' });
 
@@ -61,6 +66,7 @@ await page.screenshot({ path: out + '/2-scale.png' });
 if (!done) console.log('(자동 치수 읽기가 끝나지 않았다)');
 
 // 벽 지우기·되돌리기가 되는지 본다
+await goStep(3);
 await page.locator('[data-action="mode"][data-mode="erase"]').click();
 await sleep(300);
 console.log('되돌리기 버튼(편집 전) disabled: ' + (await page.locator('[data-action="undo"]').evaluate((b) => b.disabled)));

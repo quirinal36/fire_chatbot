@@ -27,7 +27,8 @@ const statusText = () => page.evaluate(() => {
 });
 const clearStatus = () => page.evaluate(() => { document.querySelector('.plan3d__status').textContent = ''; });
 const undoDisabled = () => page.evaluate(() => document.querySelector('[data-action="undo"]').disabled);
-const setMode = async (m) => { await page.locator('[data-action="mode"][data-mode="' + m + '"]').click(); await sleep(250); };
+const goStep = async (n) => { await page.locator('.plan3d__step[data-step="' + n + '"]').click(); await sleep(200); };
+const setMode = async (m) => { await goStep(m === 'scale' ? 2 : 3); await page.locator('[data-action="mode"][data-mode="' + m + '"]').click(); await sleep(250); };
 const clickAt = async (x, y) => { await clearStatus(); await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.up(); await sleep(250); return statusText(); };
 const dragAt = async (x0, y0, x1, y1) => { await clearStatus(); await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x1, y1, { steps: 5 }); await page.mouse.up(); await sleep(250); return statusText(); };
 
@@ -55,7 +56,7 @@ if (ready) {
   let missed = 0;
   const probes = [];
   for (let i = 4; i < 60; i++) probes.push([box.x + (box.width * i) / 64, box.y + box.height * 0.5]);
-  for (let i = 4; i < 44; i++) probes.push([box.x + box.width * 0.5, box.y + (box.height * i) / 48]);
+  for (let i = 6; i < 42; i++) probes.push([box.x + box.width * 0.5, box.y + (box.height * i) / 48]);
   for (const [x, y] of probes) {
     const s = await clickAt(x, y);
     if (s.indexOf('벽을 뚫어 창') >= 0) { if (!onWall) onWall = { x, y, s }; }

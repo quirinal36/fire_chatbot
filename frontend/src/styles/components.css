@@ -539,6 +539,8 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  /* 도면 탭이 패널 폭에 따라 배치를 바꾼다 (@container panel) */
+  container: panel / inline-size;
 }
 
 .plan__head {
@@ -1350,93 +1352,6 @@
   background: none;
 }
 
-/* ------------------------------ 도면 3D (plan3d) ------------------------------ */
-
-.plan3d {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  padding: var(--space-3) var(--space-4) var(--space-4);
-}
-
-.plan3d__bar {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-2);
-}
-
-.plan3d__file-tools {
-  display: flex;
-  flex-wrap: wrap;
-  min-width: 0;
-  gap: var(--space-2);
-}
-
-/* 버튼 글자는 어느 폭에서도 갈라지지 않는다. 자리가 모자라면 버튼 묶음이 다음 줄로 내려간다 */
-.plan3d .btn {
-  white-space: nowrap;
-}
-
-.plan3d__upload {
-  flex: 0 0 auto;
-  cursor: pointer;
-}
-
-/* 파일 입력은 화면에서 감춰 두므로 초점 링이 라벨(버튼 모양)에 보여야 한다 */
-.plan3d__upload:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.plan3d__status {
-  margin: 0;
-  /* 긴 오류 문구가 가로로 삐져나가 버튼을 밀어내지 않게 한다 */
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font: var(--text-body-sm);
-  color: var(--ink-muted);
-}
-
-.plan3d__recovery {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.plan3d__journey {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-}
-
-.plan3d__origin,
-.plan3d__steps {
-  margin: 0;
-  font: var(--text-micro);
-}
-
-.plan3d__steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  padding: var(--space-1) 0 0;
-  list-style: none;
-  color: var(--ink-muted);
-}
-
-.plan3d__steps .is-done {
-  color: var(--success);
-}
-
-.plan3d__steps .is-current {
-  color: var(--ink);
-  font-weight: 600;
-}
-
 .case__missing {
   margin: 0 0 var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -1448,365 +1363,6 @@
 .case__results {
   margin-top: var(--space-5);
   border-top: 1px solid var(--border-subtle);
-}
-
-.plan3d__stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 320px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--surface-base);
-  overflow: hidden;
-}
-
-.plan3d__stage[data-empty='true'] {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-style: dashed;
-}
-
-.plan3d__stage.is-over {
-  border-color: var(--accent);
-  background: var(--surface-sunken);
-}
-
-.plan3d__hint {
-  margin: 0;
-  padding: var(--space-4);
-  text-align: center;
-  font: var(--text-body-sm);
-  color: var(--ink-muted);
-}
-
-.plan3d__canvas {
-  position: absolute;
-  inset: 0;
-}
-
-.plan3d__canvas canvas {
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-  touch-action: none;
-}
-
-.plan3d__ctl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2) var(--space-4);
-}
-
-.plan3d__field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font: var(--text-micro);
-  color: var(--ink-muted);
-}
-
-.plan3d__field input[type='range'] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.plan3d__field--check {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-2);
-  grid-column: 1 / -1;
-}
-
-.plan3d__note {
-  margin: 0;
-  font: var(--text-micro);
-  font-weight: 400;
-  color: var(--ink-muted);
-}
-
-.plan3d__tools {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-/* 편집 도구와 보기 도구는 각각 한 묶음으로 움직인다. 좁으면 묶음째 다음 줄로 */
-.plan3d__modes {
-  min-width: 0;
-}
-
-/* 자리는 지키고 보이지만 않는다. 모드를 바꿔도 도구 줄 높이가 그대로라 캔버스가 움직이지 않는다 */
-.plan3d .is-invisible {
-  visibility: hidden;
-}
-
-.plan3d__context {
-  display: flex;
-  flex: 0 0 108px;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.plan3d__modes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.plan3d__modes .btn[aria-pressed='true'] {
-  background: var(--ink);
-  color: var(--surface-base);
-  border-color: var(--ink);
-}
-
-.plan3d__help {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font: var(--text-body-sm);
-  color: var(--ink-muted);
-}
-
-.plan3d__edit,
-.plan3d__scale,
-.plan3d__door,
-.plan3d__window {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3);
-}
-
-.plan3d__edit .plan3d__field,
-.plan3d__door .plan3d__field,
-.plan3d__window .plan3d__field,
-.plan3d__scale .plan3d__field {
-  flex: 1 1 12rem;
-}
-
-.plan3d__field--num input {
-  width: 100%;
-  min-height: 36px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-base);
-  color: var(--ink);
-  font: var(--text-body-sm);
-}
-
-.plan3d__areas {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-3);
-}
-
-.plan3d__total {
-  margin: 0 0 var(--space-2);
-  font: var(--text-body-sm);
-}
-
-.plan3d__scale-state {
-  margin: 0 0 var(--space-2);
-  font: var(--text-micro);
-  color: var(--ink-muted);
-}
-
-.plan3d__scale-state strong {
-  color: var(--accent);
-}
-
-.plan3d__sub {
-  font: var(--text-micro);
-  font-weight: 400;
-  color: var(--ink-muted);
-}
-
-.plan3d__rooms {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px var(--space-3);
-}
-
-.plan3d__rooms li {
-  min-width: 0;
-}
-
-.plan3d__room {
-  width: 100%;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 2px var(--space-1);
-  background: transparent;
-  color: inherit;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font: var(--text-micro);
-  font-weight: 400;
-  text-align: left;
-  cursor: pointer;
-}
-
-.plan3d__room[aria-pressed="true"] {
-  background: var(--surface-sunken);
-}
-
-.plan3d__room-area {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-
-.plan3d__swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: hsl(var(--hue) 70% 55%);
-}
-
-.plan3d__save,
-.plan3d__saved {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-}
-
-.plan3d__field--grow {
-  flex: 1 1 auto;
-}
-
-.plan3d__field--num select {
-  width: 100%;
-  min-height: 36px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-base);
-  color: var(--ink);
-  font: var(--text-body-sm);
-}
-
-.plan3d__review {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--surface-sunken);
-}
-
-.plan3d__suggest {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font: var(--text-body-sm);
-}
-
-.plan3d__suggest label {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  cursor: pointer;
-}
-
-/* 도면 면적을 영업장 조건으로 가져오는 상자 */
-.plan3d__import-open {
-  margin: var(--space-2) 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.plan3d__import {
-  margin-top: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  display: grid;
-  gap: var(--space-2);
-}
-
-.plan3d__import-title {
-  margin: 0;
-  font: var(--text-body-sm);
-  font-weight: 600;
-}
-
-.plan3d__import .plan3d__field--num select {
-  width: 100%;
-  min-height: 36px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-base);
-  color: var(--ink);
-  font: var(--text-body-sm);
-}
-
-.plan3d__import .plan3d__field--check {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  font: var(--text-micro);
-}
-
-.plan3d__import-actions {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-/* 진행 단계의 "지금 할 일" — 주 행동 하나만 크게 (UX-003) */
-.plan3d__todo {
-  margin: var(--space-2) 0 0;
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--border-subtle);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  font: var(--text-micro);
-}
-
-.plan3d__todo-label {
-  flex: 1 1 100%;
-  color: var(--ink-muted);
-}
-
-/* 고급 설정은 접어 둔다. 필요한 사람만 펼친다 */
-.plan3d__advanced {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2);
-}
-
-.plan3d__advanced > summary {
-  cursor: pointer;
-  font: var(--text-body-sm);
-  color: var(--ink-muted);
-}
-
-.plan3d__advanced[open] > summary {
-  margin-bottom: var(--space-2);
-  color: var(--ink);
-}
-
-.plan3d__advanced .plan3d__note {
-  margin-top: var(--space-2);
 }
 
 /* 조건 입력: 기본 → 더 필요한 항목 → 접어 둔 나머지 (UX-005) */
@@ -1857,4 +1413,801 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
+}
+
+/* ------------------------------ 도면 탭 (plan3d) ------------------------------
+   단계 칩 한 줄 → 그 단계의 도구 카드 하나 → 캔버스(도구 띠는 캔버스 위에) → 바닥 면적 띠.
+   칩·덱·띠는 높이가 고정이고 카드는 hidden 으로만 바뀐다. 모드·문구·서랍 어느 것도 캔버스 크기를 바꾸지 않는다 (UX-001). */
+
+.plan3d {
+  /* 카드 줄 높이 = 줄 수 × 버튼 높이 + 틈. 좁은 폭은 줄 수만, 터치는 버튼 높이만 바꾼다 */
+  --steps-h: 44px;
+  --deck-rows: 1;
+  --deck-btn-h: 36px;
+  --deck-row-h: calc(var(--deck-rows) * var(--deck-btn-h) + (var(--deck-rows) - 1) * var(--space-1));
+  --deck-ctx-h: 40px;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+/* 보통 폭에서는 칩과 덱이 .plan3d 의 직접 자식처럼 놓인다. 넓은 폭에서만 왼쪽 열이 된다 */
+.plan3d__side {
+  display: contents;
+}
+
+/* 버튼 글자는 어느 폭에서도 갈라지지 않는다. 자리가 모자라면 버튼이 다음 줄로 내려간다 */
+.plan3d .btn {
+  white-space: nowrap;
+}
+
+.plan3d kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font: var(--text-micro);
+}
+
+/* ---- 단계 칩: 누르면 그 단계의 도구 카드가 나온다 */
+.plan3d__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-1);
+  height: var(--steps-h);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan3d__steps li {
+  min-width: 0;
+}
+
+.plan3d__step {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: var(--text-body-sm);
+  font-weight: 600;
+  text-align: left;
+}
+
+.plan3d__step:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.plan3d__step-n {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  font: var(--text-micro);
+}
+
+.plan3d__step[data-state='done'] .plan3d__step-n {
+  background: var(--success);
+  color: #fff;
+}
+
+/* 지금 단계는 검정, 보고 있는 카드는 주황 테두리. 보통은 둘이 같다 */
+.plan3d__step[aria-current='step'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface-base);
+}
+
+.plan3d__step[aria-current='step'] .plan3d__step-n {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.plan3d__step[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.plan3d__step-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan3d__step-state {
+  font: var(--text-micro);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.plan3d__step-sub {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--text-micro);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.plan3d__step[aria-current='step'] .plan3d__step-sub {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* ---- 덱: 높이 고정, 카드는 hidden 토글. 16 + 20 + 12 + 줄 + 문맥 */
+.plan3d__deck {
+  box-sizing: border-box;
+  height: calc(var(--space-2) * 2 + 20px + 12px + var(--deck-row-h) + var(--deck-ctx-h));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.plan3d__todo {
+  flex: 0 0 20px;
+  height: 20px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  white-space: nowrap;
+  font: var(--text-body-sm);
+  font-weight: 600;
+}
+
+.plan3d__todo-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan3d__todo-back {
+  flex: 0 0 auto;
+  font: var(--text-micro);
+}
+
+.plan3d__card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.plan3d__card-row {
+  height: var(--deck-row-h);
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: var(--space-1);
+}
+
+.plan3d__card-ctx {
+  height: var(--deck-ctx-h);
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: var(--space-1) var(--space-2);
+  font: var(--text-caption);
+  color: var(--ink-muted);
+}
+
+.plan3d__help {
+  margin: 0;
+}
+
+.plan3d__help strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.plan3d__mode-group {
+  display: contents;
+}
+
+.plan3d__sep {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--border-strong);
+}
+
+.plan3d__micro {
+  font: var(--text-micro);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.plan3d__saved,
+.plan3d__save,
+.plan3d__scale,
+.plan3d__edit,
+.plan3d__door,
+.plan3d__window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan3d__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: var(--text-micro);
+  color: var(--ink-muted);
+}
+
+.plan3d__field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.plan3d__field--num input,
+.plan3d__field--num select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--ink);
+  font: var(--text-body-sm);
+}
+
+/* 카드 안 입력칸은 라벨과 한 줄에 놓는다. 세로로 쌓으면 40px 문맥 줄에 안 들어간다 */
+.plan3d__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.plan3d__field--inline input,
+.plan3d__field--inline select {
+  width: 6.5rem;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  color: var(--ink);
+  font: var(--text-body-sm);
+}
+
+.plan3d__field--inline input[data-ctl='name'] {
+  width: 11rem;
+}
+
+.plan3d__field--inline select[data-ctl='saved'] {
+  width: 12rem;
+}
+
+.plan3d__field--check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.plan3d__note {
+  margin: 0;
+  font: var(--text-micro);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+/* 하는 일은 주황(편집 도구), 보는 법은 검정(둘러보기·평면/3D/원본) */
+.plan3d__mode[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 2px var(--surface-sunken), 0 0 0 4px var(--accent);
+}
+
+.plan3d__mode[data-mode='view'][aria-pressed='true'],
+.plan3d__hud--view .btn[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface-base);
+  box-shadow: none;
+}
+
+/* 카드 밖에서 도구를 켜면 도착한 칩·버튼이 두 번 맥동해 "여기로 왔다" 를 알린다 */
+@keyframes plan3d-guide {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  45% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+.plan3d .is-guided {
+  animation: plan3d-guide 600ms ease-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan3d .is-guided {
+    animation: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* ---- 캔버스: 남은 높이를 전부 차지한다. 도구 띠·서랍은 absolute 라 캔버스 크기에 영향이 없다 */
+.plan3d__view {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 240px;
+}
+
+.plan3d__stage {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-base);
+  overflow: hidden;
+}
+
+.plan3d__stage[data-empty='true'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+}
+
+.plan3d__stage.is-over {
+  border-color: var(--accent);
+  background: var(--surface-sunken);
+}
+
+.plan3d__hint {
+  margin: 0;
+  padding: var(--space-4);
+  text-align: center;
+  font: var(--text-body-sm);
+  color: var(--ink-muted);
+}
+
+.plan3d__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.plan3d__canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  touch-action: none;
+}
+
+/* 도구 띠: 띠 자체는 이벤트를 흘려보내고 버튼만 받는다. 버튼 사이 틈에서 끌기·휠이 캔버스로 간다 */
+.plan3d__hud {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - var(--space-4));
+  pointer-events: none;
+}
+
+.plan3d__hud .btn,
+.plan3d__hud .link,
+.plan3d__hud-badge,
+.plan3d__recovery .btn {
+  pointer-events: auto;
+}
+
+.plan3d__hud .btn {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--surface-hud);
+  box-shadow: var(--shadow-input);
+  font: var(--text-body-sm);
+}
+
+.plan3d__hud .btn svg {
+  flex: 0 0 auto;
+}
+
+.plan3d__hud--mode {
+  top: var(--space-2);
+  left: var(--space-2);
+}
+
+.plan3d__hud-badge {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hud);
+  box-shadow: var(--shadow-input);
+  font: var(--text-body-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.plan3d__hud--view {
+  top: var(--space-2);
+  right: var(--space-2);
+  justify-content: flex-end;
+}
+
+.plan3d__hud--status {
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  min-height: 28px;
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--surface-hud);
+}
+
+.plan3d__stage[data-empty='true'] ~ .plan3d__hud--status {
+  border-top: 0;
+  background: transparent;
+}
+
+.plan3d__status {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--text-body-sm);
+  color: var(--ink-muted);
+  transition: opacity 400ms ease;
+}
+
+/* 성공 문구는 잠시 뒤 흐려진다. 글자와 aria-live 는 남는다. 오류와 복구 버튼은 흐려지지 않는다 */
+.plan3d__status.is-stale {
+  opacity: 0.55;
+}
+
+.plan3d__recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* 서랍: 구역 목록·면적 넣기·인식 조정. 캔버스 아래 절반까지만 덮어 위쪽 구역 강조는 보인다 */
+.plan3d__drawer {
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: 36px;
+  z-index: 3;
+  max-height: 50%;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-modal);
+}
+
+.plan3d__drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  font: var(--text-body-sm);
+}
+
+.plan3d__ctl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2) var(--space-4);
+}
+
+.plan3d__advanced .plan3d__note {
+  margin-top: var(--space-2);
+}
+
+.plan3d__rooms {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px var(--space-3);
+}
+
+.plan3d__rooms li {
+  min-width: 0;
+}
+
+.plan3d__room {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: var(--text-micro);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan3d__room[aria-pressed='true'] {
+  background: var(--surface-sunken);
+}
+
+.plan3d__room-area {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan3d__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: hsl(var(--hue) 70% 55%);
+}
+
+/* 도면 면적을 영업장 조건으로 가져오는 상자 */
+.plan3d__import {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.plan3d__import .plan3d__field--check {
+  font: var(--text-micro);
+}
+
+.plan3d__import-actions {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---- 바닥 띠: 항상 화면 안에. 넘치는 목록은 서랍으로 */
+.plan3d__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: var(--space-1) 0 var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+}
+
+.plan3d__foot-empty {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--ink-muted);
+}
+
+.plan3d__areas {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.plan3d__foot-main {
+  min-width: 0;
+}
+
+.plan3d__total {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--text-body-sm);
+  line-height: 20px;
+}
+
+.plan3d__scale-state {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--text-micro);
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--ink-muted);
+}
+
+.plan3d__scale-state strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.plan3d__sub {
+  font: var(--text-micro);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.plan3d__foot-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.plan3d__foot .btn {
+  min-height: 32px;
+}
+
+.plan3d__foot .btn[aria-expanded='true'] {
+  background: var(--surface-sunken);
+}
+
+/* ---- 폭 구간. 좁으면 칩 부제·근거를 숨기고 카드 줄을 두세 줄로 */
+@container panel (max-width: 719px) {
+  .plan3d {
+    --steps-h: 36px;
+    --deck-rows: 2;
+    --deck-ctx-h: 76px;
+  }
+
+  .plan3d__step {
+    grid-template-rows: auto;
+  }
+
+  .plan3d__step-sub {
+    display: none;
+  }
+
+  .plan3d__hud--view .btn span {
+    display: none;
+  }
+
+  .plan3d__total .plan3d__sub,
+  .plan3d__detail {
+    display: none;
+  }
+
+}
+
+/* 왼쪽 위 도구 띠(배지·되돌리기)가 보이면 오른쪽 보기 도구를 한 줄 아래로 — 760px 미만에서는 둘이 한 줄에 못 들어간다 */
+@container panel (max-width: 759px) {
+  .plan3d__hud--mode:not([hidden]) ~ .plan3d__hud--view {
+    top: 48px;
+  }
+}
+
+@container panel (max-width: 519px) {
+
+  /* 축척 상태와 그 링크가 잘리지 않게 두 줄로 */
+  .plan3d__scale-state {
+    white-space: normal;
+  }
+
+  .plan3d__field--inline select[data-ctl='saved'] {
+    width: 8rem;
+  }
+
+  .plan3d__foot-actions .btn {
+    padding: 0 var(--space-2);
+  }
+
+  /* 칩 하나가 80px 남짓이다. 번호와 짧은 이름만 남긴다 */
+  .plan3d__step {
+    padding: 0 6px;
+    column-gap: 4px;
+  }
+
+  .plan3d__step-title {
+    font-size: 0;
+  }
+
+  .plan3d__step-title::after {
+    content: attr(data-short);
+    font: var(--text-caption);
+    font-weight: 600;
+  }
+
+  .plan3d__step-state {
+    display: none;
+  }
+
+  .plan3d__rooms {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 크게 보기: 칩과 카드를 왼쪽 열에 세로로, 캔버스는 나머지 전부 */
+@container panel (min-width: 1100px) {
+  .plan3d {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'side view'
+      'foot foot';
+    column-gap: var(--space-4);
+    row-gap: var(--space-2);
+  }
+
+  .plan3d__side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    grid-area: side;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .plan3d__steps {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .plan3d__step {
+    height: 44px;
+  }
+
+  .plan3d__deck {
+    height: auto;
+  }
+
+  .plan3d__card-row,
+  .plan3d__card-ctx {
+    height: auto;
+    min-height: 36px;
+    overflow: visible;
+  }
+
+  .plan3d__view {
+    grid-area: view;
+  }
+
+  .plan3d__foot {
+    grid-area: foot;
+  }
+}
+
+/* 터치: 1080px 이하에서 패널이 화면을 덮는다. 손가락 크기만큼은 되어야 한다 */
+@media (pointer: coarse) {
+  .plan3d {
+    --deck-btn-h: 44px;
+  }
+
+  .plan3d__hud .btn,
+  .plan3d__hud-badge,
+  .plan3d__foot .btn,
+  .plan3d__card-row .btn {
+    min-height: 44px;
+  }
 }

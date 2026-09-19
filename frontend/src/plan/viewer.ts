@@ -35,10 +35,14 @@ export interface Viewer {
   setEditing(handlers: EditHandlers | null): void;
   /** 지금 보는 방식 그대로 도면 전체가 들어오게 카메라만 다시 맞춘다 */
   fitView(): void;
+  /** 도구 띠·서랍이 덮는 가장자리(px). 맞출 때 그만큼을 뺀 나머지에 도면을 넣는다. fitView 는 부르는 쪽이 챙긴다 */
+  setInsets(insets: Partial<ViewInsets>): void;
   dispose(): void;
 }
 
 export type ViewMode = 'plan' | '3d';
+/** 캔버스 가장자리에서 도면이 가려지는 폭(px) */
+export interface ViewInsets { top: number; bottom: number; left: number; right: number }
 /** 미리보기 색. 문·창은 놓인 뒤의 표식과 같은 색이라 끌면서 결과를 미리 본다 */
 export type GuideTone = 'add' | 'erase' | 'scale' | 'door' | 'window';
 
@@ -124,6 +128,7 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   /** 도면을 감싸는 상자의 반 크기(m). 평면은 이 상자에 맞춘다 */
   let fitHalfX = 5;
   let fitHalfZ = 5;
+  let insets: ViewInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 
   function disposeGroup(group: THREE.Group): void {
     for (const child of group.children) {
@@ -294,14 +299,25 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   function fitCamera(direction: THREE.Vector3): void {
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    // 도구 띠·서랍이 덮는 가장자리를 뺀 나머지에 맞춘다. 전부 가려지는 값이 와도 최소 30% 는 남긴다
+    const cw = Math.max(1, container.clientWidth);
+    const ch = Math.max(1, container.clientHeight);
+    const useH = Math.max(0.3, (cw - insets.left - insets.right) / cw);
+    const useV = Math.max(0.3, (ch - insets.top - insets.bottom) / ch);
     // 평면은 바로 위에서 보므로 도면 상자가 화면에 꽉 차게 맞춘다. 구에 맞추면 넓은 화면에서 도면이 작아진다.
     // 3D 는 돌려 볼 것이므로 어느 각도에서도 잘리지 않는 구에 맞춘다
     const dist =
       viewMode === 'plan'
-        ? Math.max(fitHalfX / Math.tan(hFov / 2), fitHalfZ / Math.tan(vFov / 2)) * 1.06
-        : fitRadius / Math.sin(Math.min(vFov, hFov) / 2);
-    controls.target.copy(fitCenter);
-    camera.position.copy(fitCenter).addScaledVector(direction.clone().normalize(), dist);
+        ? Math.max(fitHalfX / (Math.tan(hFov / 2) * useH), fitHalfZ / (Math.tan(vFov / 2) * useV)) * 1.06
+        : fitRadius / Math.sin(Math.min(vFov * useV, hFov * useH) / 2);
+    const target = fitCenter.clone();
+    if (viewMode === 'plan') {
+      // 남은 영역의 가운데가 화면 가운데보다 아래(오른쪽)면 도면도 그만큼 내려(옮겨) 놓는다. 평면에서 화면 아래는 +Z, 오른쪽은 +X
+      target.z -= ((insets.top - insets.bottom) / 2 / ch) * 2 * dist * Math.tan(vFov / 2);
+      target.x -= ((insets.left - insets.right) / 2 / cw) * 2 * dist * Math.tan(hFov / 2);
+    }
+    controls.target.copy(target);
+    camera.position.copy(target).addScaledVector(direction.clone().normalize(), dist);
     camera.far = dist * 10;
     camera.updateProjectionMatrix();
     controls.update();
@@ -471,6 +487,9 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
     },
     fitView() {
       fitCamera(viewDirection());
+    },
+    setInsets(next) {
+      insets = { ...insets, ...next };
     },
     dispose() {
       running = false;

@@ -326,7 +326,12 @@ const actions: AppActions = {
     const state = store.getState();
     const conversationId = state.activeConversationId;
     const current = state.conversations.find((c) => c.id === conversationId);
-    if (!current || current.caseId) return;
+    if (!current) return;
+    // 조건이 이미 있으면 새로 만들지 않고 그 탭으로 간다. 조용히 끝나면 버튼이 고장난 줄 안다
+    if (current.caseId) {
+      store.setState({ panelOpen: true, panelTab: 'check' });
+      return;
+    }
     void createCase(conversationId)
       .then((data) => {
         updateConversation(conversationId, (c) => ({ ...c, caseId: data.id, title: c.title === '새 대화' ? '영업장 확인' : c.title }));

@@ -17,6 +17,7 @@ const base = '__BASE__';
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok, detail: detail || '' });
 const MODES = ['view', 'add', 'erase', 'door', 'window', 'scale'];
+const goStep = async (n) => { await page.locator('.plan3d__step[data-step="' + n + '"]').click(); await sleep(200); };
 
 async function waitUntil(fn, ms, what) {
   const until = Date.now() + ms;
@@ -36,6 +37,8 @@ const measure = () => page.evaluate(() => {
     stage: [Math.round(st.x), Math.round(st.y), Math.round(st.width), Math.round(st.height)].join(','),
     overflowX: Math.max(root.scrollWidth - root.clientWidth, (() => { const h = document.querySelector('.panel__header'); return h.scrollWidth - h.clientWidth; })()),
     tall: btns.filter((b) => b.getBoundingClientRect().height > 48).map((b) => b.textContent.trim()),
+    // 보이는 카드의 버튼 줄이 상자 안에 다 들어가는가 (줄 높이 산식이 폭·터치 규칙과 맞는가)
+    rowHidden: Array.from(document.querySelectorAll('.plan3d__card:not([hidden]) .plan3d__card-row')).filter((r) => r.scrollHeight > r.clientHeight + 1).length,
     clipped: btns.filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent.trim()),
   };
 });
@@ -56,12 +59,22 @@ for (const width of [360, 440, 760]) {
 
   const seen = [];
   for (const mode of MODES) {
+    await goStep(mode === 'scale' ? 2 : 3);
     await page.locator('[data-action="mode"][data-mode="' + mode + '"]').click();
     await sleep(350);
     seen.push(await measure());
   }
+  await goStep(3);
   await page.locator('[data-action="mode"][data-mode="view"]').click();
   await sleep(350);
+  seen.push(await measure());
+  // 칩을 돌고 서랍을 열고 닫아도 캔버스는 그대로여야 한다
+  for (const n of [1, 2, 4, 3]) { await goStep(n); seen.push(await measure()); }
+  await page.locator('[data-action="drawer"][data-drawer="rooms"]').click();
+  await sleep(300);
+  seen.push(await measure());
+  await page.locator('[data-action="drawer-close"]').click();
+  await sleep(300);
   seen.push(await measure());
 
   const boxes = seen.map((m) => m.stage);
@@ -71,6 +84,16 @@ for (const width of [360, 440, 760]) {
   const clipped = seen.flatMap((m) => m.clipped);
   check(width + 'px · 버튼 글자가 갈라지거나 잘리지 않음', tall.length === 0 && clipped.length === 0, tall.concat(clipped).join(','));
   check(width + 'px · 가로로 넘치지 않음', seen.every((m) => m.overflowX === 0), String(Math.max.apply(null, seen.map((m) => m.overflowX))));
+  check(width + 'px · 카드 버튼 줄이 상자 안에 다 들어감', seen.every((m) => m.rowHidden === 0), String(Math.max.apply(null, seen.map((m) => m.rowHidden))));
+  const geo = await page.evaluate(() => {
+    const st = document.querySelector('.plan3d__stage').getBoundingClientRect();
+    const body = document.querySelector('.panel__body').getBoundingClientRect();
+    const panel = document.querySelector('.panel').getBoundingClientRect();
+    const total = document.querySelector('.plan3d__total').getBoundingClientRect();
+    return { share: st.height / body.height, inside: total.bottom <= panel.bottom + 1 && total.top >= panel.top, stage: Math.round(st.height) };
+  });
+  check(width + 'px · 캔버스가 본문의 ' + (width < 520 ? 55 : 60) + '% 이상', geo.share >= (width < 520 ? 0.55 : 0.6), Math.round(geo.share * 100) + '% (' + geo.stage + 'px)');
+  check(width + 'px · 바닥 면적이 패널 안에 보임', geo.inside, String(geo.inside));
 
   // 긴 오류 문구가 들어와도 복구 버튼이 패널 안에 남는가
   const long = await page.evaluate(() => {
